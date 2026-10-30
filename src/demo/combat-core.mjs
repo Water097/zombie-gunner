@@ -16,10 +16,13 @@ import {
   makeEnemy, apply, has, read, tick, onDeath, clear,
   vehicleRammedMultiplier, getKnockDistance, applyKnockToPosition,
 } from '../status/status-system.mjs';
-import { CARDS, MERCY_CARD, rollCards } from './cards.mjs';
+import { CARDS, MERCY_CARD, rollCards, MAX_LEVEL, xpForLevel } from './cards.mjs';
 
 // ── 世界尺寸（逻辑像素，竖屏）──
 export const WORLD = { W: 450, H: 800 };
+
+// ── 一局结构（03 册：局内等级 1→20；用户约定共 20 波，第 19 波前后到 20 级，最后一波收尾）──
+export const RUN = { maxWave: 20, waveMs: 22000, maxLevel: MAX_LEVEL };
 
 // ── 要塞炮塔（玩家）基准参数 ──
 export const PLAYER = {
@@ -127,12 +130,13 @@ export function createWorld() {
     particles: [],
     floaters: [],
     rings: [],
-    skills: { freeze: { cd: 0 }, burn: { cd: 0 }, shock: { cd: 0 } },
+    skills: {}, // 开局没有任何技能（对齐参考视频），技能靠「学习技能卡」解锁
     mods: defaultMods(),
     // ── 升级 / 选卡（03 册）──
     level: 1,
     xp: 0,
-    xpNext: 40,
+    xpNext: xpForLevel(1),
+    won: false,
     pendingCards: [],
     cardPhase: false,
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
@@ -251,12 +255,14 @@ function killEnemy(world, enemy, scored = true) {
 // ── 经验 / 升级（03 册一节：经验来自击杀，每波保证至少升一级）──
 function gainXp(world, amount) {
   world.xp += amount * world.mods.xpRate;
-  if (world.xp >= world.xpNext) {
+  if (world.xp >= world.xpNext && world.level < MAX_LEVEL) {
     world.xp -= world.xpNext;
     world.level += 1;
-    world.xpNext = Math.round(world.xpNext * 1.35);
+    world.xpNext = xpForLevel(world.level);
     world.pendingCards = rollCards(world);
     world.cardPhase = true;   // 暂停战斗，等玩家选卡
+  } else if (world.xp >= world.xpNext) {
+    world.xp = world.xpNext;  // 已满级，经验条封顶
   }
 }
 
@@ -264,6 +270,15 @@ export function chooseCard(world, idx) {
   if (!world.cardPhase) return false;
   const card = world.pendingCards[idx];
   if (!card) return false;
+  if (card.kind === 'learn') {
+    // 学会一个新技能：解锁槽位，之后它的强化卡才会进池
+    world.skills[card.target] = { cd: 0 };
+    world.cardStacks[card.id] = (world.cardStacks[card.id] || 0) + 1;
+    if (world.slotLevels[card.target] !== undefined) world.slotLevels[card.target] += 1;
+    world.pendingCards = [];
+    world.cardPhase = false;
+    return true;
+  }
   if (card.id === MERCY_CARD.id) {
     // 功能卡「要塞急救」：立即回复最大血量 30%（03 册九节，一局仅一次）
     world.fortressHp = Math.min(world.fortressMaxHp, world.fortressHp + world.fortressMaxHp * 0.3);
@@ -394,13 +409,18 @@ export function update(world, dtMs) {
   const m = world.mods;
 
   // ── 波次 / 出怪（出怪不出中线，04 册纪律；这里出在顶部 y<0 自然满足）──
+  // 共 20 波：第 20 波走完停止出怪，场上清空即通关（最后一波用于收尾）
+  const timeUp = world.time > RUN.maxWave * RUN.waveMs;
   world.spawnTimer -= dtMs;
-  if (world.spawnTimer <= 0) {
+  if (!timeUp && world.spawnTimer <= 0) {
     const batch = 1 + (Math.random() < 0.3 ? 1 : 0);
     for (let i = 0; i < batch; i++) spawnEnemy(world, pickEnemyType(world));
     const speedUp = Math.max(420, 900 - world.wave * 22);
     world.spawnTimer = speedUp;
-    if (world.time > world.wave * 22000) world.wave += 1;
+    if (world.time > world.wave * RUN.waveMs) world.wave += 1;
+  }
+  if (timeUp && world.enemies.length === 0 && !world.gameOver) {
+    world.won = true; world.gameOver = true; world.running = false;
   }
 
   // ── 技能冷却 + 自动释放（冷却好且场上有敌人即自动开火，对齐向僵尸开炮）──

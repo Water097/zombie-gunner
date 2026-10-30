@@ -8,6 +8,7 @@ import {
   createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
   PLAYER, ENEMY_TYPES, FORTRESS,
 } from './combat-core.mjs';
+import { LEARN_CARDS } from './cards.mjs';
 import { makeEnemy, apply, has } from '../status/status-system.mjs';
 
 let passed = 0, failed = 0;
@@ -23,8 +24,10 @@ function makeEnemyEntity(typeKey, x, y) {
 function makeBullet(x, y, opts = {}) {
   return { x, y, vx: 0, vy: 0, damage: PLAYER.baseDamage, life: 200, radius: PLAYER.bulletRadius, pierceLeft: 1, hitIds: [], ...opts };
 }
-// 屏蔽三技能自动释放，隔离被测机制
-function muteSkills(w) { w.skills.freeze.cd = 1e9; w.skills.burn.cd = 1e9; w.skills.shock.cd = 1e9; }
+// 屏蔽已学技能的自动释放，隔离被测机制
+function muteSkills(w) { for (const k of Object.keys(w.skills)) w.skills[k].cd = 1e9; }
+// 学会一个技能（开局默认一个技能都没有，必须先学）
+function learnSkill(w, id) { if (!w.skills[id]) w.skills[id] = { cd: 0 }; return w.skills[id]; }
 
 console.log('— 自动瞄准：开火并扣弹 —');
 {
@@ -114,10 +117,10 @@ console.log('— 冻结期间敌人停止移动 —');
 console.log('— 技能：干冰弹飞行命中并冻结 + 冷却拦截 —');
 {
   const w = createWorld(); w.running = true;
+  learnSkill(w, 'freeze'); // 开局没有技能，先学会
   const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
   e.hp = 999; e.maxHp = 999;
   w.enemies.push(e);
-  w.skills.burn.cd = 1e9; w.skills.shock.cd = 1e9; // 隔离另外两技能
   const first = castSkill(w, 'freeze'); // 手动释放，生成飞行弹
   ok('首次释放生成技能弹', first === true && w.skillShots.length === 1);
   let applied = false;
@@ -131,10 +134,10 @@ console.log('— 技能：干冰弹飞行命中并冻结 + 冷却拦截 —');
 console.log('— 技能：温压弹落点爆炸施加灼烧 + 击退 —');
 {
   const w = createWorld(); w.running = true;
+  learnSkill(w, 'burn');
   const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 200);
   e.hp = 999; e.maxHp = 999;
   w.enemies.push(e);
-  w.skills.freeze.cd = 1e9; w.skills.shock.cd = 1e9;
   castSkill(w, 'burn');
   let applied = false;
   for (let i = 0; i < 100; i++) { update(w, 16); if (has(e.st, 'burn')) { applied = true; break; } }
@@ -144,6 +147,7 @@ console.log('— 技能：温压弹落点爆炸施加灼烧 + 击退 —');
 console.log('— 技能：冷却好且场上有敌人即自动释放 —');
 {
   const w = createWorld(); w.running = true;
+  learnSkill(w, 'freeze'); learnSkill(w, 'burn'); learnSkill(w, 'shock');
   const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
   w.enemies.push(e); // 三技能 cd 初始为 0
   update(w, 16); // 一帧内应自动释放全部就绪技能
@@ -188,6 +192,23 @@ console.log('— 升级：击杀攒经验 → 三选一选卡并生效 —');
   ok('选卡后恢复战斗', w.cardPhase === false && w.pendingCards.length === 0);
 }
 
+console.log('— 开局没有任何技能，只有主武器（对齐参考视频）—');
+{
+  const w = createWorld();
+  ok('开局技能槽为空', Object.keys(w.skills).length === 0);
+}
+
+console.log('— 学习技能卡解锁技能 —');
+{
+  const w = createWorld(); w.running = true;
+  const learn = LEARN_CARDS.find((c) => c.id === 'learn-freeze');
+  w.pendingCards = [learn]; w.cardPhase = true;
+  chooseCard(w, 0);
+  ok('学会干冰弹后槽位出现', !!w.skills.freeze);
+  ok('干冰槽计数 +1', w.slotLevels.freeze === 1);
+  ok('选卡后恢复战斗', w.cardPhase === false);
+}
+
 console.log('— 弹匣固定 30（不随卡变化）—');
 {
   const w = createWorld();
@@ -211,6 +232,7 @@ console.log('— 选卡后对应槽累计加成次数（右上角要显示）—
 console.log('— 技能由宠物机器人释放（发射原点是机器人，不是要塞）—');
 {
   const w = createWorld(); w.running = true;
+  learnSkill(w, 'freeze');
   w.enemies.push(makeEnemyEntity('zombie', w.player.x, w.player.y - 200));
   muteSkills(w);
   w.skills.freeze.cd = 0; // 只放干冰

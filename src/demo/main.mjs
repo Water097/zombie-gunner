@@ -2,11 +2,15 @@
 // 只读取 combat-core 的 world 状态来画，只调用其函数来改变状态。渲染方案可整体替换为 WebGL/Pixi，
 // 游戏规则一行不动（这正是内核与渲染解耦的目的）。
 //
-// 第 6 步「状态头顶图标」在此落地：每个敌人头顶按激活状态画一组彩色小图标。
+// UI 尺寸/形状/排布对齐参考原图（513×1080 实测后换算到 450×800）：
+//   武器卡 = 横长条圆角矩形（83×22）：左机枪图标 + 左下「X级」+ 右下弹药「20/30」
+//   技能槽 = 圆形（直径 36）竖排在武器卡正下方，右下角等级角标
+//   要塞血条 = 底部长条（298×9）在要塞下方，血量数字在条右侧
+//   宠物机器人 = 悬浮在要塞右侧，负责释放全部技能
 
 import {
   createWorld, update, castSkill, manualReload, chooseCard, magSizeOf, petPos,
-  WORLD, PLAYER, FORTRESS, ENEMY_TYPES, SKILLS,
+  WORLD, PLAYER, FORTRESS, ENEMY_TYPES, SKILLS, RUN,
 } from './combat-core.mjs';
 import { has } from '../status/status-system.mjs';
 
@@ -20,18 +24,24 @@ let acc = 0;
 const STEP = 1000 / 60; // 固定步长 16.67ms，手感与帧率解耦
 let fps = 60, fpsAccum = 0, fpsFrames = 0;
 
-// 右侧竖排槽位：武器槽在右上角，三个技能槽竖排在其下方（对齐参考视频布局）
-const SLOT_SIZE = 32;
-const SLOT_X = WORLD.W - 42;
-const SLOTS = [
-  { id: 'weapon', label: '枪', color: '#ffe08a' },
-  { id: 'freeze', label: '冰', color: '#5ad1ff' },
-  { id: 'burn', label: '温', color: '#ff7a3c' },
-  { id: 'shock', label: '电', color: '#ffe14d' },
-];
-const slots = SLOTS.map((s, i) => ({
-  ...s, x: SLOT_X, y: 24 + i * 40, w: SLOT_SIZE, h: SLOT_SIZE,
-}));
+// ── 右侧 UI（换算自参考原图）──
+const CARD = { w: 83, h: 22, right: 20, y: 100, r: 4 };
+const SKILL_R = 18;                 // 直径 36
+const SKILL_CX = WORLD.W - 29;      // 圆心：右缘留 11
+const SKILL_TOP = 134;              // 第一个圆心
+const SKILL_STEP = 44;              // 间距（直径 36 + 间隙 8）
+const PET = { w: 31, h: 22 };
+const HP_BAR = { w: 298, h: 9, y: 750 };
+
+function weaponCardRect() {
+  return { x: WORLD.W - CARD.right - CARD.w, y: CARD.y, w: CARD.w, h: CARD.h };
+}
+// 技能圆：只画已学会的技能（开局一个都没有）
+function skillCircles() {
+  return Object.keys(world.skills).map((id, i) => ({
+    id, cx: SKILL_CX, cy: SKILL_TOP + i * SKILL_STEP, r: SKILL_R,
+  }));
+}
 
 function resize() {
   const scale = Math.min(window.innerWidth / WORLD.W, window.innerHeight / WORLD.H);
@@ -45,16 +55,16 @@ window.addEventListener('resize', resize);
 resize();
 
 // ── 输入 ──
-const KEY_SKILL = { '1': 'freeze', '2': 'burn', '3': 'shock' };
-
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); togglePause(); return; }
   if (e.code === 'Enter') { if (world.gameOver || !world.running) startGame(); return; }
   if (e.key === 'r' || e.key === 'R') { manualReload(world); return; }
-  // 选卡时数字键 = 选第几张
+  // 选卡时 1/2/3 = 选第几张（界面不显示序号，键盘仍可用）
   if (world.cardPhase && ['1', '2', '3', '4'].includes(e.key)) { chooseCard(world, Number(e.key) - 1); return; }
-  const sk = KEY_SKILL[e.key];
-  if (sk) castSkill(world, sk);
+  // 已学技能：数字键释放
+  const learned = Object.keys(world.skills);
+  const idx = Number(e.key) - 1;
+  if (world.skills[learned[idx]]) castSkill(world, learned[idx]);
 });
 
 function canvasToLogical(clientX, clientY) {
@@ -65,17 +75,16 @@ function canvasToLogical(clientX, clientY) {
   };
 }
 
-// 选卡界面的卡面矩形（命中检测与绘制共用）
+// 选卡界面：横排（对齐参考原图），无序号
 function cardRects() {
   const n = world.pendingCards.length;
   if (!n) return [];
-  const cardW = WORLD.W - 72;
-  const cardH = 82;
-  const gap = 14;
-  const totalH = n * cardH + (n - 1) * gap;
-  const startY = (WORLD.H - totalH) / 2;
+  const margin = 14, gap = 10;
+  const cardW = (WORLD.W - margin * 2 - gap * (n - 1)) / n;
+  const cardH = 156;
+  const y = 320;
   return world.pendingCards.map((c, i) => ({
-    card: c, x: 36, y: startY + i * (cardH + gap), w: cardW, h: cardH,
+    card: c, x: margin + i * (cardW + gap), y, w: cardW, h: cardH,
   }));
 }
 
@@ -85,18 +94,16 @@ canvas.addEventListener('pointerdown', (e) => {
   const p = canvasToLogical(e.clientX, e.clientY);
   if (!world.started) { startGame(); return; }
   if (world.gameOver) { startGame(); return; }
-  if (world.cardPhase) { // 选卡优先：点击卡面即选中
+  if (world.cardPhase) { // 选卡优先
     const rects = cardRects();
     for (let i = 0; i < rects.length; i++) if (insideRect(rects[i], p)) { chooseCard(world, i); return; }
     return;
   }
-  // 右侧槽位：技能槽点击释放；武器槽点击换弹
-  for (const s of slots) {
-    if (insideRect(s, p)) {
-      if (s.id === 'weapon') manualReload(world);
-      else castSkill(world, s.id);
-      return;
-    }
+  // 武器卡 → 换弹
+  if (insideRect(weaponCardRect(), p)) { manualReload(world); return; }
+  // 技能圆 → 释放
+  for (const c of skillCircles()) {
+    if ((p.x - c.cx) ** 2 + (p.y - c.cy) ** 2 <= c.r * c.r) { castSkill(world, c.id); return; }
   }
 });
 
@@ -105,15 +112,12 @@ function togglePause() { if (world.gameOver) return; world.running = !world.runn
 
 // ── 主循环（固定步长累加器）──
 function frame(now) {
-  const dt = Math.min(now - lastT, 100); // 防止切后台后巨步
+  const dt = Math.min(now - lastT, 100);
   lastT = now;
   acc += dt;
   while (acc >= STEP) { update(world, STEP); acc -= STEP; }
-
-  // FPS 统计
   fpsAccum += dt; fpsFrames++;
   if (fpsAccum >= 500) { fps = Math.round((fpsFrames * 1000) / fpsAccum); fpsAccum = 0; fpsFrames = 0; }
-
   render();
   requestAnimationFrame(frame);
 }
@@ -151,7 +155,6 @@ function drawBackground() {
   g.addColorStop(0, '#0b1020');
   g.addColorStop(1, '#16203a');
   ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
-  // 战场纵向车道提示
   ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
   for (let x = 60; x < WORLD.W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD.H); ctx.stroke(); }
   // 防线：敌人推进到此线即停住并持续攻击要塞
@@ -186,42 +189,25 @@ function drawFortress() {
     ctx.strokeStyle = 'rgba(255,220,120,0.9)';
     ctx.beginPath(); ctx.arc(tgt.x, tgt.y, tgt.radius + 6, 0, Math.PI * 2); ctx.stroke();
   }
-  // 要塞血条：放在要塞下方（对齐参考视频）
   drawFortressHpBar();
-  drawAmmoBar();
 }
 
+// 要塞血条：在要塞下方，血量数字在条右侧（对齐参考原图）
 function drawFortressHpBar() {
-  const w = 260, h = 12, x = (WORLD.W - w) / 2, y = world.player.y + 26;
+  const w = HP_BAR.w, h = HP_BAR.h, x = (WORLD.W - w) / 2 - 20, y = HP_BAR.y;
   const f = Math.max(0, world.fortressHp / world.fortressMaxHp);
-  ctx.fillStyle = 'rgba(0,0,0,0.5)';
-  roundRect(x, y, w, h, 4); ctx.fill();
-  ctx.fillStyle = f > 0.5 ? '#7fe07f' : f > 0.25 ? '#ffd36e' : '#ff5d5d';
-  roundRect(x, y, w * f, h, 4); ctx.fill();
-  ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.lineWidth = 1;
-  roundRect(x, y, w, h, 4); ctx.stroke();
-  // 血量数字在血条右侧（对齐参考视频：数字显示在条右侧）
-  ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'right';
-  ctx.fillText(`${Math.ceil(world.fortressHp)}`, x + w - 6, y + 9);
+  ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  roundRect(x, y, w, h, 3); ctx.fill();
+  ctx.fillStyle = f > 0.5 ? '#4fd463' : f > 0.25 ? '#ffd36e' : '#ff5d5d';
+  roundRect(x, y, w * f, h, 3); ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.16)'; ctx.lineWidth = 1;
+  roundRect(x, y, w, h, 3); ctx.stroke();
+  // 血量数字在条右侧
+  ctx.fillStyle = '#7fe07f'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(`${Math.ceil(world.fortressHp)}`, x + w + 8, y + h - 1);
 }
 
-function drawAmmoBar() {
-  const p = world.player;
-  const mag = magSizeOf();
-  const w = 180, h = 6, x = (WORLD.W - w) / 2, y = world.player.y + 48;
-  ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, w, h);
-  if (p.reloading) {
-    const f = 1 - p.reloadTimer / (PLAYER.reloadMs * world.mods.reloadMul);
-    ctx.fillStyle = '#ffd36e'; ctx.fillRect(x, y, w * f, h);
-  } else {
-    ctx.fillStyle = p.ammo <= 6 ? '#ff5d5d' : '#7fe0ff';
-    ctx.fillRect(x, y, w * (p.ammo / mag), h);
-  }
-  ctx.fillStyle = '#cdd8ee'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
-  ctx.fillText(p.reloading ? '换弹中…' : `弹药 ${p.ammo} / ${mag}`, WORLD.W / 2, y + 18);
-}
-
-// 宠物机器人：所有技能都由它释放（对齐《向僵尸开炮》：玩家对象只管主武器射击与换弹）
+// 宠物机器人：所有技能都由它释放（玩家对象只管主武器射击与换弹）
 function drawPet() {
   const pet = petPos(world);
   const bob = Math.sin(world.time / 260) * 3;
@@ -229,39 +215,35 @@ function drawPet() {
   const flash = world.petFlash > 0;
   // 悬浮阴影
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath(); ctx.ellipse(pet.x, pet.y + 15, 10, 3.5, 0, 0, Math.PI * 2); ctx.fill();
-  // 出手闪光
+  ctx.beginPath(); ctx.ellipse(pet.x, pet.y + 14, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
   if (flash) {
     ctx.globalAlpha = Math.max(0, world.petFlash / 320) * 0.8;
     ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(x, y, 17, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
   }
-  // 机身
-  ctx.fillStyle = flash ? '#eaf6ff' : '#7f8db3';
-  roundRect(x - 11, y - 9, 22, 18, 6); ctx.fill();
-  ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 1.5;
-  roundRect(x - 11, y - 9, 22, 18, 6); ctx.stroke();
+  // 机翼/螺旋桨
+  ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(x - 16, y - 6); ctx.lineTo(x - 9, y - 6); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 9, y - 6); ctx.lineTo(x + 16, y - 6); ctx.stroke();
+  // 机身（浅蓝青色圆润机体，对齐参考原图的无人机）
+  ctx.fillStyle = flash ? '#eaf6ff' : '#7fd8e8';
+  roundRect(x - PET.w / 2, y - PET.h / 2, PET.w, PET.h, 8); ctx.fill();
+  ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 1.5;
+  roundRect(x - PET.w / 2, y - PET.h / 2, PET.w, PET.h, 8); ctx.stroke();
   // 眼睛（朝向当前目标）
   const tgt = world.enemies.find((e) => e.id === world.player.targetId);
-  let ex = 0, ey = -1;
+  let ex = 0, ey = 0;
   if (tgt) { const a = Math.atan2(tgt.y - y, tgt.x - x); ex = Math.cos(a) * 3; ey = Math.sin(a) * 3; }
   ctx.fillStyle = '#0b1020';
-  ctx.beginPath(); ctx.arc(x - 4 + ex, y + ey, 2.4, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + 4 + ex, y + ey, 2.4, 0, Math.PI * 2); ctx.fill();
-  // 天线
-  ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(x, y - 9); ctx.lineTo(x, y - 15); ctx.stroke();
-  ctx.fillStyle = flash ? '#ffffff' : '#7fe0ff';
-  ctx.beginPath(); ctx.arc(x, y - 16, 2.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x - 5 + ex, y + ey, 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 5 + ex, y + ey, 2.6, 0, Math.PI * 2); ctx.fill();
 }
 
 function drawEnemies() {
   for (const e of world.enemies) {
     const x = e.x, y = e.y, r = e.radius;
-    // 攻击姿态：停下攻击要塞（有攻击间隔与动作，不是撞上去就消失）
     if (e.attacking) {
-      // 攻击动作：出手瞬间向前挥出一道爪击
       if (e.attackFlash > 0) {
         const a = Math.max(0, e.attackFlash / 220);
         ctx.globalAlpha = a;
@@ -272,20 +254,16 @@ function drawEnemies() {
       ctx.strokeStyle = 'rgba(255,107,107,0.75)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke();
     }
-    // 主体
     ctx.fillStyle = e.color;
     ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
     if (e.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
-    // 状态描边
     if (has(e.st, 'freeze')) { ctx.strokeStyle = '#5ad1ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
     else if (has(e.st, 'stun')) { ctx.strokeStyle = '#c77dff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
     else if (has(e.st, 'burn')) { ctx.strokeStyle = '#ff7a3c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
-    // 血条
     const bw = r * 2;
     ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(x - r, y - r - 9, bw, 4);
     ctx.fillStyle = e.hp / e.maxHp > 0.35 ? '#7fe07f' : '#ff6b6b';
     ctx.fillRect(x - r, y - r - 9, bw * Math.max(0, e.hp / e.maxHp), 4);
-    // 第 6 步：状态头顶图标（一组彩色小方块）
     drawStatusIcons(e, x - r, y - r - 22);
   }
 }
@@ -297,11 +275,7 @@ const STATUS_ICON = [
 function drawStatusIcons(e, x0, y) {
   let x = x0;
   for (const [id, col] of STATUS_ICON) {
-    if (has(e.st, id)) {
-      ctx.fillStyle = col;
-      ctx.fillRect(x, y, 7, 7);
-      x += 9;
-    }
+    if (has(e.st, id)) { ctx.fillStyle = col; ctx.fillRect(x, y, 7, 7); x += 9; }
   }
 }
 
@@ -314,7 +288,6 @@ function drawBullets() {
   }
 }
 
-// 技能弹道渲染：温压=飞行火球（落点爆炸）／干冰·电磁=朝敌飞行的发光拖尾
 function drawSkillShots() {
   for (const s of world.skillShots) {
     if (s.id === 'burn') {
@@ -325,12 +298,10 @@ function drawSkillShots() {
       ctx.globalAlpha = 1;
     } else {
       const ang = Math.atan2(s.vy, s.vx);
-      // 电磁速度已下调，这里把弹体拉长并加辉光，保证弹道看得见
       const len = s.id === 'shock' ? 34 : 20;
       ctx.save();
       ctx.translate(s.x, s.y); ctx.rotate(ang);
-      ctx.globalAlpha = 0.3;
-      ctx.fillStyle = s.color;
+      ctx.globalAlpha = 0.3; ctx.fillStyle = s.color;
       ctx.beginPath();
       ctx.moveTo(-len, 0); ctx.lineTo(0, -s.radius - 3); ctx.lineTo(len * 0.4, 0); ctx.lineTo(0, s.radius + 3);
       ctx.closePath(); ctx.fill();
@@ -378,102 +349,158 @@ function drawHUD() {
   ctx.fillStyle = '#e7eefc'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left';
   ctx.fillText(`分数 ${world.score}`, 12, 22);
   ctx.textAlign = 'center';
-  ctx.fillText(`第 ${world.wave} 波`, WORLD.W / 2 - 40, 22);
+  ctx.fillText(`第 ${world.wave} / ${RUN.maxWave} 波`, WORLD.W / 2 - 40, 22);
 
   // 经验条（03 册：顶部蓝色长条 + 等级数字）
-  const bx = 10, bw = WORLD.W - 90; // 右侧给槽位让出空间
+  const bx = 10, bw = WORLD.W - 130; // 右侧给武器卡让位
   ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(bx, 42, bw, 6);
   ctx.fillStyle = '#5aa9ff';
   ctx.fillRect(bx, 42, bw * Math.min(1, world.xp / world.xpNext), 6);
   ctx.fillStyle = '#cfe3ff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
   ctx.fillText(`Lv ${world.level}`, bx + 2, 58);
 
-  // 右侧竖排槽位：武器在上，三个技能竖排在下
-  for (const s of slots) {
-    const isWeapon = s.id === 'weapon';
-    const sk = isWeapon ? null : SKILLS[s.id];
-    ctx.fillStyle = 'rgba(20,28,48,0.92)';
-    roundRect(s.x, s.y, s.w, s.h, 7); ctx.fill();
-    ctx.strokeStyle = s.color; ctx.lineWidth = 2;
-    roundRect(s.x, s.y, s.w, s.h, 7); ctx.stroke();
-    ctx.fillStyle = s.color; ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
-    ctx.fillText(s.label, s.x + s.w / 2, s.y + s.h / 2 + 5);
-    // 技能冷却遮罩
-    if (!isWeapon) {
-      const slot = world.skills[s.id];
-      const full = sk.cooldownMs * world.mods.skillCdMul[s.id];
-      if (slot.cd > 0) {
-        const frac = Math.min(1, slot.cd / full);
-        ctx.fillStyle = 'rgba(0,0,0,0.62)';
-        roundRect(s.x, s.y, s.w, s.h * frac, 7); ctx.fill();
-      }
-    }
-    // 该槽累计加成次数（选了卡就看得到）
-    const lv = world.slotLevels[s.id] || 0;
-    if (lv > 0) {
-      const bxx = s.x + s.w - 8, byy = s.y + s.h - 8;
-      ctx.fillStyle = '#0b1020';
-      ctx.beginPath(); ctx.arc(bxx, byy, 8, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = s.color; ctx.lineWidth = 1.5;
-      ctx.beginPath(); ctx.arc(bxx, byy, 8, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
-      ctx.fillText(String(lv), bxx, byy + 3);
-    }
-  }
+  drawWeaponCard();
+  drawSkillSlots();
 
-  // FPS
   ctx.fillStyle = 'rgba(160,200,255,0.7)'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
   ctx.fillText(`${fps} FPS`, WORLD.W - 12, WORLD.H - 8);
 }
 
-// 选卡界面：升级时暂停战斗，三选一（08 册：每张卡带主语；03 册：卡面说清加的是哪一项）
+// 武器卡：横长条圆角矩形（对齐参考原图）—— 左机枪图标 + 左下「X级」+ 右下弹药「剩余/弹匣」
+function drawWeaponCard() {
+  const r = weaponCardRect();
+  const p = world.player;
+  const mag = magSizeOf();
+  ctx.fillStyle = 'rgba(22,30,50,0.92)';
+  roundRect(r.x, r.y, r.w, r.h, CARD.r); ctx.fill();
+  ctx.strokeStyle = '#ffe08a'; ctx.lineWidth = 1.5;
+  roundRect(r.x, r.y, r.w, r.h, CARD.r); ctx.stroke();
+
+  // 机枪图标（简笔：枪身 + 枪管 + 弹匣）
+  const gx = r.x + 6, gy = r.y + 4;
+  ctx.fillStyle = '#b9c4dc';
+  ctx.fillRect(gx, gy + 2, 22, 5);          // 枪身
+  ctx.fillRect(gx + 22, gy + 3, 10, 3);      // 枪管
+  ctx.fillStyle = '#8b98b4';
+  ctx.fillRect(gx + 5, gy + 7, 5, 4);        // 弹匣
+  ctx.fillRect(gx + 14, gy + 7, 3, 3);       // 握把
+
+  // 左下：武器等级
+  ctx.fillStyle = '#ffd36e'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText(`${world.slotLevels.weapon}级`, r.x + 6, r.y + r.h - 4);
+  // 右下：弹药「剩余/弹匣」（对齐参考原图的 20/30）
+  ctx.textAlign = 'right';
+  if (p.reloading) {
+    ctx.fillStyle = '#ffd36e'; ctx.font = 'bold 9px sans-serif';
+    ctx.fillText('换弹中', r.x + r.w - 6, r.y + r.h - 4);
+    const f = 1 - p.reloadTimer / (PLAYER.reloadMs * world.mods.reloadMul);
+    ctx.fillStyle = '#ffd36e'; ctx.fillRect(r.x, r.y + r.h - 2, r.w * f, 2);
+  } else {
+    ctx.fillStyle = p.ammo <= 6 ? '#ff5d5d' : '#eaf2ff'; ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(`${p.ammo}/${mag}`, r.x + r.w - 6, r.y + r.h - 4);
+  }
+}
+
+// 技能槽：圆形竖排在武器卡下方，右下角等级角标；只显示已学会的技能
+function drawSkillSlots() {
+  for (const c of skillCircles()) {
+    const sk = SKILLS[c.id];
+    const slot = world.skills[c.id];
+    ctx.fillStyle = 'rgba(18,26,44,0.92)';
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = sk.color; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = sk.color; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(sk.name[0], c.cx, c.cy + 6);
+    // 冷却遮罩（自顶向下扫过）
+    const full = sk.cooldownMs * world.mods.skillCdMul[c.id];
+    if (slot.cd > 0) {
+      const frac = Math.min(1, slot.cd / full);
+      ctx.fillStyle = 'rgba(0,0,0,0.62)';
+      ctx.beginPath();
+      ctx.moveTo(c.cx, c.cy);
+      ctx.arc(c.cx, c.cy, c.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
+      ctx.closePath(); ctx.fill();
+    }
+    // 右下角等级角标（对齐参考原图）
+    const lv = world.slotLevels[c.id] || 0;
+    const bxx = c.cx + c.r - 3, byy = c.cy + c.r - 3;
+    ctx.fillStyle = '#0b1020';
+    ctx.beginPath(); ctx.arc(bxx, byy, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#eaf2ff'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(bxx, byy, 8, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(String(lv), bxx, byy + 3);
+  }
+}
+
+// 文字折行（横排卡片较窄，需要折行）
+function wrapText(text, maxWidth) {
+  ctx.font = '12px sans-serif';
+  const lines = [];
+  let cur = '';
+  for (const ch of text) {
+    if (ctx.measureText(cur + ch).width > maxWidth && cur) { lines.push(cur); cur = ch; }
+    else cur += ch;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+}
+
+// 选卡界面：横排三张、无序号（对齐参考原图）
 function drawCardOverlay() {
-  ctx.fillStyle = 'rgba(6,10,20,0.86)'; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
-  ctx.fillStyle = '#eaf2ff'; ctx.textAlign = 'center'; ctx.font = 'bold 20px sans-serif';
-  ctx.fillText(`升级！Lv ${world.level}`, WORLD.W / 2, 96);
+  ctx.fillStyle = 'rgba(6,10,20,0.88)'; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
+  ctx.fillStyle = '#eaf2ff'; ctx.textAlign = 'center'; ctx.font = 'bold 22px sans-serif';
+  ctx.fillText(`升级！Lv ${world.level}`, WORLD.W / 2, 250);
   ctx.fillStyle = '#aeb9d0'; ctx.font = '12px sans-serif';
-  ctx.fillText('选一张（点击卡面，或按 1 / 2 / 3）', WORLD.W / 2, 120);
+  ctx.fillText('选一张', WORLD.W / 2, 274);
 
   const rects = cardRects();
-  rects.forEach((r, i) => {
+  rects.forEach((r) => {
     const kindColor = r.card.kind === 'weapon' ? '#ffe08a'
       : r.card.kind === 'skill' ? '#7fe0ff'
+      : r.card.kind === 'learn' ? '#b6ff7a'
       : r.card.kind === 'function' ? '#7fe07f' : '#ffb3d9';
     ctx.fillStyle = 'rgba(24,32,54,0.98)';
-    ctx.fillRect(r.x, r.y, r.w, r.h);
+    roundRect(r.x, r.y, r.w, r.h, 8); ctx.fill();
     ctx.strokeStyle = kindColor; ctx.lineWidth = 2;
-    ctx.strokeRect(r.x, r.y, r.w, r.h);
-    ctx.textAlign = 'left';
+    roundRect(r.x, r.y, r.w, r.h, 8); ctx.stroke();
+
+    ctx.textAlign = 'center';
     ctx.fillStyle = kindColor; ctx.font = 'bold 15px sans-serif';
-    ctx.fillText(`${i + 1}. ${r.card.name}`, r.x + 14, r.y + 28);
-    ctx.fillStyle = '#e7eefc'; ctx.font = '13px sans-serif';
-    ctx.fillText(r.card.text, r.x + 14, r.y + 54);
+    ctx.fillText(r.card.name, r.x + r.w / 2, r.y + 32);
+    // 效果文案折行
+    ctx.fillStyle = '#e7eefc'; ctx.font = '12px sans-serif';
+    const lines = wrapText(r.card.text, r.w - 18);
+    lines.forEach((ln, i) => ctx.fillText(ln, r.x + r.w / 2, r.y + 62 + i * 18));
+    // 类型标签
     ctx.fillStyle = '#8b98b4'; ctx.font = '10px sans-serif';
     const tag = r.card.kind === 'weapon' ? '武器卡' : r.card.kind === 'skill' ? '技能卡'
-      : r.card.kind === 'function' ? '功能卡 · 一局一次' : '加成卡';
-    ctx.fillText(tag, r.x + 14, r.y + 72);
+      : r.card.kind === 'learn' ? '学习技能' : r.card.kind === 'function' ? '功能卡 · 一局一次' : '加成卡';
+    ctx.fillText(tag, r.x + r.w / 2, r.y + r.h - 14);
   });
 }
 
 function drawStartOverlay() {
   ctx.fillStyle = 'rgba(6,10,20,0.78)'; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
   ctx.fillStyle = '#eaf2ff'; ctx.textAlign = 'center';
-  ctx.font = 'bold 26px sans-serif'; ctx.fillText('要塞射击 · Demo', WORLD.W / 2, WORLD.H / 2 - 40);
+  ctx.font = 'bold 26px sans-serif'; ctx.fillText('要塞射击 · Demo', WORLD.W / 2, WORLD.H / 2 - 52);
   ctx.font = '14px sans-serif'; ctx.fillStyle = '#aeb9d0';
-  ctx.fillText('要塞只管主武器射击与换弹（弹匣 30）', WORLD.W / 2, WORLD.H / 2 - 12);
-  ctx.fillText('技能全部由宠物机器人自动释放（也可点右侧槽位）', WORLD.W / 2, WORLD.H / 2 + 12);
-  ctx.fillText('击杀升级 → 三选一选卡 · R 换弹', WORLD.W / 2, WORLD.H / 2 + 36);
-  ctx.fillText('冻结装甲尸车可触发 ×3 硬门禁', WORLD.W / 2, WORLD.H / 2 + 60);
+  ctx.fillText('开局只有主武器子弹，技能要靠选卡学会', WORLD.W / 2, WORLD.H / 2 - 22);
+  ctx.fillText('武器只管射击与换弹（弹匣 30）· R 换弹', WORLD.W / 2, WORLD.H / 2 + 2);
+  ctx.fillText('技能由右侧宠物机器人自动释放', WORLD.W / 2, WORLD.H / 2 + 26);
+  ctx.fillText(`共 ${RUN.maxWave} 波 · 20 级 · 第 ${RUN.maxWave} 波收尾`, WORLD.W / 2, WORLD.H / 2 + 50);
   ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 16px sans-serif';
-  ctx.fillText('点击屏幕开始', WORLD.W / 2, WORLD.H / 2 + 106);
+  ctx.fillText('点击屏幕开始', WORLD.W / 2, WORLD.H / 2 + 96);
 }
 
 function drawGameOver() {
   ctx.fillStyle = 'rgba(6,10,20,0.82)'; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
-  ctx.fillStyle = '#ff6b6b'; ctx.textAlign = 'center'; ctx.font = 'bold 28px sans-serif';
-  ctx.fillText('要塞失守', WORLD.W / 2, WORLD.H / 2 - 30);
+  const won = world.won;
+  ctx.fillStyle = won ? '#7fe07f' : '#ff6b6b'; ctx.textAlign = 'center'; ctx.font = 'bold 28px sans-serif';
+  ctx.fillText(won ? '守住了！' : '要塞失守', WORLD.W / 2, WORLD.H / 2 - 30);
   ctx.fillStyle = '#eaf2ff'; ctx.font = '16px sans-serif';
-  ctx.fillText(`最终分数 ${world.score} · 击杀 ${world.killCount} · Lv ${world.level}`, WORLD.W / 2, WORLD.H / 2 + 6);
+  ctx.fillText(`分数 ${world.score} · 击杀 ${world.killCount} · Lv ${world.level} · 第 ${world.wave} 波`, WORLD.W / 2, WORLD.H / 2 + 6);
   ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 15px sans-serif';
   ctx.fillText('点击 / 回车 重新开始', WORLD.W / 2, WORLD.H / 2 + 48);
 }
