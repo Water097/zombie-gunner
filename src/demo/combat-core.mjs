@@ -150,7 +150,7 @@ function dealDamage(world, enemy, raw, source = 'weapon') {
 function killEnemy(world, enemy, scored = true) {
   if (!enemy.alive) return;
   enemy.alive = false;
-  onDeath(enemy); // 状态单一真相源：死亡即清空，防止 DoT 打到尸体
+  onDeath(enemy.st); // 状态单一真相源：死亡即清空，防止 DoT 打到尸体（传入状态宿主 .st，非 demo 包装）
   if (scored) {
     world.score += enemy.score;
     world.killCount += 1;

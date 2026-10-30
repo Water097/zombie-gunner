@@ -101,5 +101,20 @@ console.log('— 技能冷却拦截重复释放 —');
   ok('技能进入冷却', w.skills.freeze.cd > 0);
 }
 
+console.log('— 回归：子弹击杀触发 onDeath（修复宿主/包装分叉）—');
+{
+  const w = createWorld(); w.running = true; w.started = true;
+  // 脆弱敌人置于射程内，让自动开火的子弹在若干帧后命中致死
+  const frag = makeEnemyEntity('zombie', w.player.x, w.player.y - 200);
+  frag.hp = 5; frag.maxHp = 5;
+  w.enemies.push(frag);
+  let threw = false, removed = false;
+  try {
+    for (let i = 0; i < 400; i++) { update(w, 16); if (!w.enemies.includes(frag)) { removed = true; break; } }
+  } catch (err) { threw = true; console.log('    抛错:', err && err.message); }
+  ok('击杀路径未抛异常（onDeath 收到宿主 .st）', !threw);
+  ok('敌人被击杀并移除', removed);
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);
