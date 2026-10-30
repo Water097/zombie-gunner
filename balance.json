@@ -1,0 +1,252 @@
+{
+  "_comment": "要塞射击 数值表 v0.4。所有 [P] 标记需 playtest 校准。模型说明见 numbers-v0.4.md",
+  "_version": "0.4",
+
+  "meta": {
+    "note": "DPS 分两个口径：singleDps(打单体/Boss) 与 clearDps(打群体)。clearDps = singleDps * (1 + aoe * densityFactor)。densityFactor = min(8, 1 + 0.35 * 同屏敌人数)。"
+  },
+
+  "session": {
+    "waves": 20,
+    "waveDurationSec": 30,
+    "waveBreakSec": 4,
+    "bossWaveDurationSec": 60,
+    "totalSec": 676,
+    "checkpointWaves": [5, 10, 15],
+    "waveBreakHealPct": 0.01
+  },
+
+  "xp": {
+    "zombieXp": { "normal": 1, "runner": 1, "bomber": 3, "spitter": 2, "armored": 3, "flyer": 1, "mini": 40, "boss": 60 },
+    "levelCostBase": 9.6,
+    "levelCostExp": 1.15,
+    "targetUpgradesPerRun": [23, 27],
+    "_note": "cost(n) = 9.0 * n^1.15。base 5.0 实测给 36 次(超标)，8.5 给 12-28(前期太少)；9.0 为二次插值，目标 23-27"
+  },
+
+  "playerLevel": {
+    "costBase": 40,
+    "costExp": 1.15,
+    "maxLevelChapter1": 12,
+    "outerAtkPerLevel": 0.06,
+    "outerWeaponDpsPerLevel": 0.06,
+    "_outerNote": "局外硬上限：玩家等级 L 提供攻击 +6%*L(封顶+60%)、武器 DPS +6%*L(封顶约+54%)。原 0.10/0.09 导致后期反而更简单(通关率随关卡上升)",
+    "firstClearRewardBase": 50,
+    "firstClearRewardPerLevel": 10,
+    "repeatClearRatio": 0.2,
+    "_note": "cost(L) = 40 * L^1.15；通关关卡 k 首通奖励 = 50 + 10*k"
+  },
+
+  "fortress": {
+    "baseHp": 3400,
+    "waveBreakHeal": 0.01
+  },
+
+  "weapons": [
+    { "id": "rifle", "name": "步枪", "dps": 120, "rate": 2.0, "dmgPerShot": 60, "rarity": "common", "fragments": 0 },
+    { "id": "smg", "name": "冲锋枪", "dps": 135, "rate": 3.5, "dmgPerShot": 38.5, "rarity": "common", "fragments": 30 },
+    { "id": "shotgun", "name": "霰弹枪", "dps": 150, "rate": 1.2, "dmgPerShot": 125, "rarity": "rare", "fragments": 30 },
+    { "id": "cannon", "name": "榴弹炮", "dps": 175, "rate": 0.8, "dmgPerShot": 219, "rarity": "rare", "fragments": 30 },
+    { "id": "laser", "name": "激光枪", "dps": 200, "rate": 4.0, "dmgPerShot": 50, "rarity": "epic", "fragments": 30 }
+  ],
+
+  "zombies": {
+    "normal":   { "hp": 100,  "speed": 40, "dmgToFortress": 10,  "introWave": 1 },
+    "runner":   { "hp": 60,   "speed": 90, "dmgToFortress": 8,   "introWave": 3 },
+    "bomber":   { "hp": 150,  "speed": 60, "dmgToFortress": 60,  "introWave": 4 },
+    "spitter":  { "hp": 80,   "speed": 30, "dmgToFortress": 5,   "introWave": 9, "rangedDps": 5 },
+    "armored":  { "hp": 400,  "speed": 35, "dmgToFortress": 15,  "introWave": 11, "physicalResist": 0.6 },
+    "flyer":    { "hp": 70,   "speed": 70, "dmgToFortress": 12,  "introWave": 13 },
+    "mini":     { "hp": 2200, "speed": 25, "dmgToFortress": 50,  "introWave": 5 },
+    "boss":     { "hp": 40000, "speed": 20, "dmgToFortress": 200, "introWave": 20, "hpGrowRatio": 0.5 }
+  },
+
+  "waveDensity": [1.0, 1.6, 2.2, 2.4, 2.8, 3.0, 3.2, 1.0, 3.4, 3.6, 3.8, 4.0, 4.2, 1.2, 4.5, 5.5, 6.0, 6.5, 7.0, 3.0],
+  "waveBaseCount": 30,
+  "waveHpGrowth": 0.10,
+  "levelHpGrowth": 0.12,
+
+  "waves": [
+    { "w": 1,  "type": "warm",  "note": "教学：提示指向与升级" },
+    { "w": 2,  "type": "warm" },
+    { "w": 3,  "type": "warm",  "new": "runner" },
+    { "w": 4,  "type": "intro", "new": "bomber" },
+    { "w": 5,  "type": "elite", "mini": 1, "checkpoint": true },
+    { "w": 6,  "type": "rise" },
+    { "w": 7,  "type": "rise" },
+    { "w": 8,  "type": "supply", "xpBonus": 0.5 },
+    { "w": 9,  "type": "intro", "new": "spitter" },
+    { "w": 10, "type": "elite", "mini": 2, "checkpoint": true },
+    { "w": 11, "type": "intro", "new": "armored" },
+    { "w": 12, "type": "rise" },
+    { "w": 13, "type": "rise",  "new": "flyer" },
+    { "w": 14, "type": "supply", "xpBonus": 0.5 },
+    { "w": 15, "type": "elite", "mini": 2, "checkpoint": true },
+    { "w": 16, "type": "high",  "multiDirection": true },
+    { "w": 17, "type": "high",  "multiDirection": true },
+    { "w": 18, "type": "high",  "multiDirection": true },
+    { "w": 19, "type": "climax" },
+    { "w": 20, "type": "boss",  "boss": 1, "durationSec": 60 }
+  ],
+
+  "levels": [
+    { "id": 1,  "recLevel": 1,  "hpMul": 0.35, "modifier": "none",               "note": "教学" },
+    { "id": 2,  "recLevel": 2,  "hpMul": 0.45, "modifier": "density+10%" },
+    { "id": 3,  "recLevel": 3,  "hpMul": 0.55, "modifier": "bomber x1.5" },
+    { "id": 4,  "recLevel": 4,  "hpMul": 0.65, "modifier": "spitter 提前到波6" },
+    { "id": 5,  "recLevel": 5,  "hpMul": 0.75, "modifier": "mini hp +30%" },
+    { "id": 6,  "recLevel": 6,  "hpMul": 0.75, "modifier": "speed +20%" },
+    { "id": 7,  "recLevel": 7,  "hpMul": 1.1, "modifier": "flyer 提前到波10" },
+    { "id": 8,  "recLevel": 8,  "hpMul": 1.2, "modifier": "fortress hp -20%" },
+    { "id": 9,  "recLevel": 9,  "hpMul": 1.32, "modifier": "density +15% 混合" },
+    { "id": 10, "recLevel": 10, "hpMul": 1.45, "modifier": "boss", "boss": true }
+  ],
+
+  "skills": {
+    "_tiers": "质变档 maxLevel 7；数值档 maxLevel 10",
+
+    "fire": {
+      "class": "A", "name": "火焰弹", "maxLevel": 7, "unlockPlayerLevel": 3,
+      "levels": [
+        { "aoe": 0.25, "dmg": 1.05, "note": "命中爆炸" },
+        { "aoe": 0.30, "dmg": 1.05 },
+        { "aoe": 0.55, "dmg": 1.08, "note": "范围 +60%" },
+        { "aoe": 0.62, "dmg": 1.10 },
+        { "aoe": 0.68, "dmg": 1.10, "dot": 0.15, "note": "附加燃烧" },
+        { "aoe": 0.78, "dmg": 1.12, "dot": 0.18 },
+        { "aoe": 1.10, "dmg": 1.15, "dot": 0.22, "note": "爆炸连锁" }
+      ]
+    },
+    "frost": {
+      "class": "A", "name": "冰霜弹", "maxLevel": 7, "unlockPlayerLevel": 6,
+      "levels": [
+        { "slow": 0.20, "dmg": 1.00, "note": "减速 20%" },
+        { "slow": 0.25, "dmg": 1.00 },
+        { "slow": 0.25, "dmg": 1.00, "aoeSlow": true, "aoe": 0.15, "note": "范围减速" },
+        { "slow": 0.35, "dmg": 1.05, "aoe": 0.15 },
+        { "slow": 0.45, "dmg": 1.10, "aoe": 0.15, "vuln": 0.10, "note": "易伤 +10%" },
+        { "slow": 0.55, "dmg": 1.10, "aoe": 0.20, "vuln": 0.10 },
+        { "slow": 1.00, "dmg": 1.15, "aoe": 0.25, "vuln": 0.10, "freeze": true, "note": "冻结 1.5s" }
+      ]
+    },
+    "lightning": {
+      "class": "A", "name": "雷电子弹", "maxLevel": 7, "unlockPlayerLevel": 10,
+      "levels": [
+        { "chain": 2, "chainRatio": 0.60, "aoe": 0.20 },
+        { "chain": 2, "chainRatio": 0.70, "aoe": 0.25 },
+        { "chain": 3, "chainRatio": 0.70, "aoe": 0.45 },
+        { "chain": 3, "chainRatio": 0.80, "aoe": 0.50 },
+        { "chain": 3, "chainRatio": 1.00, "aoe": 0.60, "note": "链击不衰减" },
+        { "chain": 4, "chainRatio": 1.00, "aoe": 0.75 },
+        { "chain": 5, "chainRatio": 1.00, "aoe": 1.00, "note": "链 5 + 落雷" }
+      ]
+    },
+    "beam": {
+      "class": "A", "name": "光束弹", "maxLevel": 7, "unlockPlayerLevel": 11,
+      "levels": [
+        { "dmg": 1.10, "pierceAll": false, "aoe": 0.05, "note": "瞬发命中" },
+        { "dmg": 1.20, "aoe": 0.08 },
+        { "dmg": 1.35, "aoe": 0.12 },
+        { "dmg": 1.50, "aoe": 0.18 },
+        { "dmg": 1.70, "aoe": 0.25, "pierceAll": true, "note": "全穿透" },
+        { "dmg": 1.90, "aoe": 0.32, "pierceAll": true },
+        { "dmg": 2.20, "aoe": 0.42, "pierceAll": true }
+      ]
+    },
+    "split": {
+      "class": "B", "name": "分裂弹", "maxLevel": 7, "unlockPlayerLevel": 1,
+      "levels": [
+        { "hits": 2.0, "dmg": 1.00, "aoe": 0.30, "note": "命中分裂 2" },
+        { "hits": 2.5, "dmg": 1.02, "aoe": 0.45 },
+        { "hits": 3.0, "dmg": 1.05, "aoe": 0.60, "note": "分裂 3" },
+        { "hits": 3.4, "dmg": 1.05, "aoe": 0.72 },
+        { "hits": 3.8, "dmg": 1.08, "aoe": 0.90, "airburst": true, "note": "飞行中分裂" },
+        { "hits": 4.2, "dmg": 1.10, "aoe": 1.05, "airburst": true },
+        { "hits": 5.0, "dmg": 1.12, "aoe": 1.60, "airburst": true, "secondSplit": true, "note": "二级分裂" }
+      ]
+    },
+    "pierce": {
+      "class": "B", "name": "穿透弹", "maxLevel": 7, "unlockPlayerLevel": 1,
+      "levels": [
+        { "pierce": 1, "aoe": 0.35 },
+        { "pierce": 1, "dmg": 1.05, "aoe": 0.45 },
+        { "pierce": 2, "dmg": 1.05, "aoe": 0.70, "note": "穿 2" },
+        { "pierce": 2, "dmg": 1.08, "aoe": 0.85 },
+        { "pierce": 3, "dmg": 1.10, "aoe": 1.00, "note": "穿 3" },
+        { "pierce": 4, "dmg": 1.12, "aoe": 1.30 },
+        { "pierce": 99, "dmg": 1.15, "aoe": 1.80, "ramp": 0.10, "note": "全穿透 + 递增" }
+      ]
+    },
+    "multi": {
+      "class": "B", "name": "多重射击", "maxLevel": 7, "unlockPlayerLevel": 2,
+      "levels": [
+        { "extra": 1, "ratio": 0.70, "aoe": 0.45 },
+        { "extra": 1, "ratio": 0.75, "aoe": 0.55 },
+        { "extra": 2, "ratio": 0.70, "aoe": 0.90, "note": "+2 发" },
+        { "extra": 2, "ratio": 0.78, "aoe": 1.00 },
+        { "extra": 2, "ratio": 0.85, "aoe": 1.10, "note": "伤害 85%" },
+        { "extra": 3, "ratio": 0.80, "aoe": 1.40 },
+        { "extra": 3, "ratio": 0.90, "aoe": 1.70 }
+      ]
+    },
+    "homing": {
+      "class": "B", "name": "追踪弹", "maxLevel": 7, "unlockPlayerLevel": 12,
+      "levels": [
+        { "dmg": 1.05, "aoe": 0.10 }, { "dmg": 1.10, "aoe": 0.15 }, { "dmg": 1.18, "aoe": 0.25 },
+        { "dmg": 1.25, "aoe": 0.35 }, { "dmg": 1.35, "aoe": 0.50 }, { "dmg": 1.50, "aoe": 0.70 },
+        { "dmg": 1.70, "aoe": 0.95, "note": "全屏追踪" }
+      ]
+    },
+    "log": {
+      "class": "C", "name": "滚木", "maxLevel": 7, "unlockPlayerLevel": 7,
+      "levels": [
+        { "addDps": 0.25, "cd": 8.0, "aoe": 0.20, "note": "每 8s 横向碾压" },
+        { "addDps": 0.30, "cd": 7.5, "aoe": 0.25 },
+        { "addDps": 0.35, "cd": 6.5, "aoe": 0.30 },
+        { "addDps": 0.42, "cd": 6.0, "aoe": 0.35 },
+        { "addDps": 0.50, "cd": 5.5, "aoe": 0.42 },
+        { "addDps": 0.60, "cd": 5.0, "aoe": 0.50 },
+        { "addDps": 0.75, "cd": 5.0, "aoe": 0.65, "double": true, "note": "双滚木" }
+      ]
+    },
+    "vehicle": {
+      "class": "C", "name": "装甲车", "maxLevel": 7, "unlockPlayerLevel": 11,
+      "levels": [
+        { "addDps": 0.30, "cd": 10, "aoe": 0.25 }, { "addDps": 0.38, "cd": 9, "aoe": 0.32 },
+        { "addDps": 0.48, "cd": 8, "aoe": 0.42 },  { "addDps": 0.58, "cd": 7.5, "aoe": 0.52 },
+        { "addDps": 0.70, "cd": 7, "aoe": 0.65 },  { "addDps": 0.85, "cd": 6.5, "aoe": 0.80 },
+        { "addDps": 1.05, "cd": 6, "aoe": 1.00 }
+      ]
+    },
+    "drone": {
+      "class": "C", "name": "无人机", "maxLevel": 7, "unlockPlayerLevel": 12,
+      "levels": [
+        { "addDps": 0.20 }, { "addDps": 0.26 }, { "addDps": 0.33 }, { "addDps": 0.42 },
+        { "addDps": 0.52 }, { "addDps": 0.65 }, { "addDps": 0.80, "note": "双机" }
+      ]
+    },
+
+    "atk":   { "class": "D", "name": "攻击力+", "maxLevel": 10, "unlockPlayerLevel": 1, "perLevel": { "dmg": 0.12 } },
+    "rate":  { "class": "D", "name": "射速+",   "maxLevel": 10, "unlockPlayerLevel": 1, "perLevel": { "rate": 0.08 } },
+    "crit":  { "class": "D", "name": "暴击",     "maxLevel": 10, "unlockPlayerLevel": 8, "perLevel": { "critRate": 0.04 }, "critDmg": 1.5 },
+    "hp":    { "class": "D", "name": "要塞血量", "maxLevel": 10, "unlockPlayerLevel": 4, "perLevel": { "hp": 0.12 } },
+    "regen": { "class": "D", "name": "生命回复", "maxLevel": 10, "unlockPlayerLevel": 5, "perLevel": { "regenPct": 0.003 } },
+    "xpGain":{ "class": "D", "name": "经验获取", "maxLevel": 10, "unlockPlayerLevel": 9, "perLevel": { "xp": 0.08 } }
+  },
+
+  "draft": {
+    "unselectedWeight": 1.0,
+    "selectedWeight": 2.5,
+    "anchorSlotBase": 0.60,
+    "anchorSlotPerPool": 0.02,
+    "anchorSlotMax": 0.95,
+    "_note": "卡位1/2 权重随机；卡位3 以 P=min(0.95, 0.60+0.02*poolSize) 概率塞已选未满级技能"
+  },
+
+  "combo": [
+    { "id": "chain_frost_lightning", "need": { "frost": 7, "lightning": 1 }, "name": "导电", "effect": "对冻结目标雷击伤害 x2" },
+    { "id": "fire_log", "need": { "log": 1, "fire": 1 }, "name": "火焰滚木", "effect": "滚木附加燃烧拖尾" },
+    { "id": "fire_split", "need": { "fire": 3, "split": 3 }, "name": "燃烧弹幕", "effect": "分裂弹均带爆炸" },
+    { "id": "frost_pierce", "need": { "frost": 5, "pierce": 3 }, "name": "冰锥线", "effect": "穿透全程冻结" }
+  ]
+}
