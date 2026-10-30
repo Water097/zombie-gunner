@@ -24,22 +24,29 @@ export const WORLD = { W: 450, H: 800 };
 // ── 要塞炮塔（玩家）基准参数 ──
 export const PLAYER = {
   x: WORLD.W / 2,
-  y: WORLD.H - 64,       // 要塞位于屏幕下方（玩家前方）
+  y: WORLD.H - 92,       // 要塞位于屏幕下方（玩家前方），下方留出墙体放要塞血条
   baseDamage: 20,         // 每发基础伤害：普通僵尸 60 血 → 3 发一只
   fireIntervalMs: 500,    // 射速：1 秒 2 发
-  magSize: 12,            // 弹匣容量
+  magSize: 30,            // 弹匣固定 30（用户决定：不随卡变化）
   reloadMs: 1600,         // 换弹耗时
   range: 560,             // 自动瞄准射程
   bulletSpeed: 700,       // 子弹速度 px/s
   bulletRadius: 5,
   bulletPierce: 2,        // 初始穿透 2：可穿透第一个敌人打到第二个
+  petOffset: { dx: 52, dy: -4 }, // 宠物机器人站位（玩家右侧悬浮，对齐参考视频），技能全部由它释放
 };
 
 // ── 要塞：位于玩家前方，敌人抵达后停在防线前持续攻击（不是撞上去就消失）──
 export const FORTRESS = {
   maxHp: 100,
-  attackLine: WORLD.H - 110, // 敌人推进到此线即停住，转为攻击姿态
+  attackLine: WORLD.H - 152, // 敌人推进到此线即停住，转为攻击姿态
 };
+
+// 宠物机器人位置：技能弹的发射原点（玩家对象只管主武器射击与换弹）
+export function petPos(world) {
+  const p = world.player;
+  return { x: p.x + PLAYER.petOffset.dx, y: p.y + PLAYER.petOffset.dy };
+}
 
 // ── 敌人类型（对齐 14 册 targetType 与 04 册出怪纪律）──
 // 新增 atkDmg / atkIntervalMs：抵达要塞后的攻击力与攻击频率
@@ -87,8 +94,7 @@ function defaultMods() {
   return {
     bulletDamage: 1,      // 子弹伤害倍率
     fireRate: 1,          // 射速倍率（间隔 = 基础 / 此值）
-    magBonus: 0,          // 弹匣加值（发）
-    magMul: 1,            // 弹匣倍率（代价卡用）
+    reloadMul: 1,         // 换弹时间倍率（代价卡用；弹匣容量已固定）
     pierceBonus: 0,       // 穿透加值
     freezeDurBonus: 0,    // 冻结时长加值 ms
     burnRadiusMul: 1,     // 温压爆炸半径倍率
@@ -130,7 +136,9 @@ export function createWorld() {
     pendingCards: [],
     cardPhase: false,
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
+    slotLevels: { weapon: 0, freeze: 0, burn: 0, shock: 0 }, // 各槽累计吃了几张卡（右上角显示）
     bonusTaken: 0,       // 已拿加成卡数（08 册软上限：按等级分层解锁）
+    petFlash: 0,         // 宠物机器人释放技能时的闪光
     mercyArmed: false,   // 要塞血量首次跌破 50% → 下一抽出现「要塞急救」
     mercyUsed: false,
     fortressHp: FORTRESS.maxHp,
@@ -145,9 +153,9 @@ export function createWorld() {
 
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
-// 当前弹匣容量（受卡影响，实时算）
-export function magSizeOf(world) {
-  return Math.max(1, Math.round((PLAYER.magSize + world.mods.magBonus) * world.mods.magMul));
+// 弹匣容量固定 30（用户决定：不随卡变化）
+export function magSizeOf() {
+  return PLAYER.magSize;
 }
 
 // 移动倍率：冻结/眩晕直接 0；减速/感电按幅度叠加，封顶 90%
@@ -264,6 +272,8 @@ export function chooseCard(world, idx) {
     card.apply(world.mods);
     world.cardStacks[card.id] = (world.cardStacks[card.id] || 0) + 1;
     if (card.kind === 'bonus') world.bonusTaken += 1;
+    // 记录该槽累计吃了几张卡（右上角武器/技能槽显示）
+    if (card.target && world.slotLevels[card.target] !== undefined) world.slotLevels[card.target] += 1;
   }
   world.pendingCards = [];
   world.cardPhase = false;
@@ -324,7 +334,7 @@ function startReload(world) {
   const p = world.player;
   if (p.reloading || p.ammo >= magSizeOf(world)) return;
   p.reloading = true;
-  p.reloadTimer = PLAYER.reloadMs;
+  p.reloadTimer = PLAYER.reloadMs * world.mods.reloadMul;
 }
 
 export function manualReload(world) {
@@ -338,20 +348,22 @@ export function castSkill(world, id) {
   if (!sk) return false;
   const slot = world.skills[id];
   if (!slot || slot.cd > 0) return false;
-  const p = world.player;
   const m = world.mods;
+  // 技能由宠物机器人释放：发射原点是机器人，不是要塞炮塔
+  const pet = petPos(world);
   // 自动瞄准：取射程内最近敌人；无目标则朝正上方（避免空放）
-  const tgt = acquireTarget(world) || { x: p.x, y: 0 };
-  const ang = Math.atan2(tgt.y - p.y, tgt.x - p.x);
+  const tgt = acquireTarget(world) || { x: pet.x, y: 0 };
+  const ang = Math.atan2(tgt.y - pet.y, tgt.x - pet.x);
   world.skillShots.push({
     id, color: sk.color,
-    x: p.x + Math.cos(ang) * 30, y: p.y + Math.sin(ang) * 30,
+    x: pet.x + Math.cos(ang) * 14, y: pet.y + Math.sin(ang) * 14,
     vx: Math.cos(ang) * sk.speed, vy: Math.sin(ang) * sk.speed,
     pierce: sk.pierce,
     explodeR: sk.explodeR * m.burnRadiusMul,
     radius: sk.radius, life: 2000, dead: false,
     hitIds: [], // 穿透弹每帧都会与同一敌人重叠，靠它保证"每个敌人只生效一次"
   });
+  world.petFlash = 320; // 机器人出手闪光
   slot.cd = sk.cooldownMs * m.skillCdMul[id];
   return true;
 }
@@ -493,6 +505,7 @@ export function update(world, dtMs) {
   for (const f of world.floaters) { f.y -= 22 * (dtMs / 1000); f.life -= dtMs; }
   for (const r of world.rings) { r.r += (r.maxR - r.r) * 0.18; r.life -= dtMs; }
   if (world.fortressFlash > 0) world.fortressFlash -= dtMs;
+  if (world.petFlash > 0) world.petFlash -= dtMs;
 
   // ── 清理死亡实体 ──
   world.enemies = world.enemies.filter((e) => e.alive);

@@ -5,7 +5,8 @@
 // 运行：node src/demo/combat-core.test.mjs
 
 import {
-  createWorld, update, castSkill, chooseCard, magSizeOf, PLAYER, ENEMY_TYPES, FORTRESS,
+  createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
+  PLAYER, ENEMY_TYPES, FORTRESS,
 } from './combat-core.mjs';
 import { makeEnemy, apply, has } from '../status/status-system.mjs';
 
@@ -185,6 +186,41 @@ console.log('— 升级：击杀攒经验 → 三选一选卡并生效 —');
     ok('选卡后子弹伤害提升（卡生效）', true);
   }
   ok('选卡后恢复战斗', w.cardPhase === false && w.pendingCards.length === 0);
+}
+
+console.log('— 弹匣固定 30（不随卡变化）—');
+{
+  const w = createWorld();
+  ok('初始弹匣 30', magSizeOf() === 30 && w.player.ammo === 30);
+}
+
+console.log('— 选卡后对应槽累计加成次数（右上角要显示）—');
+{
+  const w = createWorld(); w.running = true;
+  const card = CARDS.find((c) => c.id === 'bullet-dmg');
+  ok('武器卡存在且 target 为 weapon', !!card && card.target === 'weapon');
+  w.pendingCards = [card]; w.cardPhase = true;
+  chooseCard(w, 0);
+  ok('武器槽计数 +1', w.slotLevels.weapon === 1);
+  const sk = CARDS.find((c) => c.id === 'freeze-cd');
+  w.pendingCards = [sk]; w.cardPhase = true;
+  chooseCard(w, 0);
+  ok('干冰槽计数 +1', w.slotLevels.freeze === 1);
+}
+
+console.log('— 技能由宠物机器人释放（发射原点是机器人，不是要塞）—');
+{
+  const w = createWorld(); w.running = true;
+  w.enemies.push(makeEnemyEntity('zombie', w.player.x, w.player.y - 200));
+  muteSkills(w);
+  w.skills.freeze.cd = 0; // 只放干冰
+  castSkill(w, 'freeze');
+  const s = w.skillShots[0];
+  const pet = petPos(w);
+  const dPet = Math.hypot(s.x - pet.x, s.y - pet.y);
+  const dFort = Math.hypot(s.x - w.player.x, s.y - w.player.y);
+  ok('弹体从机器人身上生成', dPet <= 16);
+  ok('不是从要塞炮塔生成', dFort >= 30);
 }
 
 console.log('— 回归：子弹击杀触发 onDeath（修复宿主/包装分叉）—');
