@@ -88,17 +88,45 @@ console.log('— 冻结期间敌人停止移动 —');
   ok('冻结期间 y 不变', Math.abs(e.y - yBefore) < 1e-6);
 }
 
-console.log('— 技能冷却拦截重复释放 —');
+console.log('— 技能：干冰弹飞行命中并冻结 + 冷却拦截 —');
 {
   const w = createWorld(); w.running = true;
-  // 技能是以要塞为中心的自走 AoE（半径 200），敌人需置于射程内
-  const e = makeEnemyEntity('zombie', 225, 650);
+  // 正前方敌人（射程内），会被自动瞄准；给足血量避免被主武器打死
+  const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
+  e.hp = 999; e.maxHp = 999;
   w.enemies.push(e);
-  const first = castSkill(w, 'freeze');
+  // 隔离：屏蔽另外两技能自动释放（它们的击退会把目标推离干冰弹路径），只验证干冰弹
+  w.skills.burn.cd = 1e9; w.skills.shock.cd = 1e9;
+  const first = castSkill(w, 'freeze'); // 手动释放，生成飞行弹
+  ok('首次释放生成技能弹', first === true && w.skillShots.length === 1);
+  let applied = false;
+  for (let i = 0; i < 60; i++) { update(w, 16); if (has(e.st, 'freeze')) { applied = true; break; } }
+  ok('干冰弹飞行命中后施加冻结', applied);
   const second = castSkill(w, 'freeze'); // 冷却中
-  ok('首次释放成功', first === true && has(e.st, 'freeze'));
   ok('冷却中二次释放被拦截', second === false);
   ok('技能进入冷却', w.skills.freeze.cd > 0);
+}
+
+console.log('— 技能：温压弹落点爆炸施加灼烧 + 击退 —');
+{
+  const w = createWorld(); w.running = true;
+  const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 200);
+  e.hp = 999; e.maxHp = 999;
+  w.enemies.push(e);
+  w.skills.freeze.cd = 1e9; w.skills.shock.cd = 1e9; // 隔离另外两技能
+  castSkill(w, 'burn');
+  let applied = false;
+  for (let i = 0; i < 80; i++) { update(w, 16); if (has(e.st, 'burn')) { applied = true; break; } }
+  ok('温压弹命中爆炸后施加灼烧', applied);
+}
+
+console.log('— 技能：冷却好且场上有敌人即自动释放 —');
+{
+  const w = createWorld(); w.running = true;
+  const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
+  w.enemies.push(e); // 三技能 cd 初始为 0
+  update(w, 16); // 一帧内应自动释放全部就绪技能
+  ok('自动释放生成技能弹', w.skillShots.length >= 1);
 }
 
 console.log('— 回归：子弹击杀触发 onDeath（修复宿主/包装分叉）—');

@@ -89,6 +89,7 @@ function render() {
   drawBackground();
   drawRings();
   drawEnemies();
+  drawSkillShots();
   drawBullets();
   drawParticles();
   drawFortress();
@@ -193,6 +194,30 @@ function drawBullets() {
   }
 }
 
+// 技能弹道渲染：温压=飞行火球（落点爆炸）／干冰·电磁=朝敌飞行的发光拖尾
+function drawSkillShots() {
+  for (const s of world.skillShots) {
+    if (s.id === 'burn') {
+      ctx.fillStyle = s.color;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.35;
+      ctx.beginPath(); ctx.arc(s.x, s.y, s.radius + 5, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      const ang = Math.atan2(s.vy, s.vx);
+      const len = s.id === 'shock' ? 26 : 18;
+      ctx.save();
+      ctx.translate(s.x, s.y); ctx.rotate(ang);
+      ctx.fillStyle = s.color; ctx.globalAlpha = 0.92;
+      ctx.beginPath();
+      ctx.moveTo(-len, 0); ctx.lineTo(0, -s.radius); ctx.lineTo(len * 0.4, 0); ctx.lineTo(0, s.radius);
+      ctx.closePath(); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+  }
+}
+
 function drawParticles() {
   for (const p of world.particles) {
     ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
@@ -263,7 +288,7 @@ function drawStartOverlay() {
   ctx.fillStyle = '#eaf2ff'; ctx.textAlign = 'center';
   ctx.font = 'bold 26px sans-serif'; ctx.fillText('要塞射击 · Demo', WORLD.W / 2, WORLD.H / 2 - 40);
   ctx.font = '14px sans-serif'; ctx.fillStyle = '#aeb9d0';
-  ctx.fillText('自动瞄准开火 · R 换弹 · 1/2/3 释放技能', WORLD.W / 2, WORLD.H / 2);
+  ctx.fillText('自动瞄准开火 · 技能自动释放（1/2/3 可提前） · R 换弹', WORLD.W / 2, WORLD.H / 2);
   ctx.fillText('冻结装甲尸车可触发 ×3 硬门禁', WORLD.W / 2, WORLD.H / 2 + 24);
   ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 16px sans-serif';
   ctx.fillText('点击屏幕开始', WORLD.W / 2, WORLD.H / 2 + 70);
