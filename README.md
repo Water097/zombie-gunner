@@ -7,6 +7,7 @@
 
 - **设计文档（`docs/`）**：00–15 共 16 本分册，覆盖核心玩法、技能体系、武器与换弹、关卡波次、敌人、加成卡、局外养成、伤害公式、收益曲线、状态系统、奖励兑换、决策档案、工作路线图等。
 - **换机器接手先读**：[`docs/16-进度与交接.md`](docs/16-进度与交接.md) —— 现状 / 怎么跑 / 待校准项 / 下一步，一页足够。
+- **项目记忆（`memory/`）**：工作记忆的仓库镜像（长期结论 + 按日工作日志）。换机器 clone 后跑一条命令就能还原到本地记忆目录，助手直接接着干。见下方「换机器」。被 clone 下来即可读，不需要额外上下文。
 - **网页 Demo（`src/`）**：可玩的竖屏射击 Demo，用来验证手感与机制，不是最终美术版。
 - **数值校准脚本（根目录 `*.mjs`）**：Monte Carlo 验证 ×2.0 局外攻击纪律、加成卡倍率、弹道经济、装备/独占机制等假设值。
 - **早期草稿（`docs/archive/`）**：v0.2 / v0.3 的 GDD 前身，记录设计演进。
@@ -43,10 +44,32 @@ zombie-gunner/
 │       ├── combat-core.test.mjs
 │       └── balance-sim.mjs     # 无头平衡模拟
 ├── docs/                       # 00–15 设计册 + 16 进度与交接 + archive/ 早期草稿
+├── memory/                     # 项目记忆镜像（MEMORY.md 长期结论 + 按日工作日志）
+├── scripts/memory-sync.mjs     # 记忆同步：本地 .workbuddy/memory ⇄ 仓库 memory/
 ├── calibrate-*.mjs / monte-carlo.mjs   # 局外数值校准脚本
 ├── balance.json / mc-result.txt / numbers-v0.4.md
 └── README.md
 ```
+
+## 换机器
+
+`.workbuddy/`（助手的工作记忆目录）不进仓库，所以记忆另存了一份镜像在 `memory/`。新机器上：
+
+```bash
+git clone git@github.com:Water097/zombie-gunner.git
+cd zombie-gunner
+node scripts/memory-sync.mjs --pull     # 把 memory/ 还原到 .workbuddy/memory/，助手即可读到
+python3 -m http.server 8123
+```
+
+日常改完记忆后（写完日志/更新长期记忆），跑一次反向同步再提交：
+
+```bash
+node scripts/memory-sync.mjs            # 本地 → memory/（镜像，会清掉已删除的旧日志）
+node scripts/memory-sync.mjs --check    # 只检查是否同步（有差异退出码 1）
+```
+
+`--pull` 只补不删：本地已存在且内容不同的同名文件会被跳过并提示，避免覆盖另一台机器上的新记录。
 
 ## 当前状态（2026-11-02）
 
