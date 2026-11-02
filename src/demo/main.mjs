@@ -25,22 +25,28 @@ const STEP = 1000 / 60; // 固定步长 16.67ms，手感与帧率解耦
 let fps = 60, fpsAccum = 0, fpsFrames = 0;
 
 // ── 右侧 UI（换算自参考原图）──
-const CARD = { w: 83, h: 22, right: 20, y: 100, r: 4 };
+// 武器卡贴在经验条正下方（参考原图：经验条往下一格就是武器卡），技能圆竖排其下、互不重叠
+const CARD = { w: 83, h: 22, right: 20, y: 56, r: 4 };
 const SKILL_R = 18;                 // 直径 36
 const SKILL_CX = WORLD.W - 29;      // 圆心：右缘留 11
-const SKILL_TOP = 134;              // 第一个圆心
+const SKILL_TOP = 110;              // 第一个圆心（卡底 78 + 间隙 14 + 半径 18）
 const SKILL_STEP = 44;              // 间距（直径 36 + 间隙 8）
+const SKILL_SLOTS = 4;              // 技能槽共 4 个：未学/未满也显示占位框
+const SKILL_ORDER = ['freeze', 'burn', 'shock']; // 槽位固定顺序（肌肉记忆稳定）
 const PET = { w: 31, h: 22 };
 const HP_BAR = { w: 298, h: 9, y: 750 };
 
 function weaponCardRect() {
   return { x: WORLD.W - CARD.right - CARD.w, y: CARD.y, w: CARD.w, h: CARD.h };
 }
-// 技能圆：只画已学会的技能（开局一个都没有）
-function skillCircles() {
-  return Object.keys(world.skills).map((id, i) => ({
-    id, cx: SKILL_CX, cy: SKILL_TOP + i * SKILL_STEP, r: SKILL_R,
-  }));
+// 技能槽：固定 4 个，按 SKILL_ORDER 排列；未学的显示空占位框
+function skillSlots() {
+  const slots = [];
+  for (let i = 0; i < SKILL_SLOTS; i++) {
+    const id = SKILL_ORDER[i] || null;
+    slots.push({ id, learned: id ? !!world.skills[id] : false, cx: SKILL_CX, cy: SKILL_TOP + i * SKILL_STEP, r: SKILL_R });
+  }
+  return slots;
 }
 
 function resize() {
@@ -61,10 +67,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') { manualReload(world); return; }
   // 选卡时 1/2/3 = 选第几张（界面不显示序号，键盘仍可用）
   if (world.cardPhase && ['1', '2', '3', '4'].includes(e.key)) { chooseCard(world, Number(e.key) - 1); return; }
-  // 已学技能：数字键释放
-  const learned = Object.keys(world.skills);
+  // 已学技能：数字键按槽位释放（1/2/3 对应固定槽位）
   const idx = Number(e.key) - 1;
-  if (world.skills[learned[idx]]) castSkill(world, learned[idx]);
+  const slotId = SKILL_ORDER[idx];
+  if (slotId && world.skills[slotId]) castSkill(world, slotId);
 });
 
 function canvasToLogical(clientX, clientY) {
@@ -101,9 +107,9 @@ canvas.addEventListener('pointerdown', (e) => {
   }
   // 武器卡 → 换弹
   if (insideRect(weaponCardRect(), p)) { manualReload(world); return; }
-  // 技能圆 → 释放
-  for (const c of skillCircles()) {
-    if ((p.x - c.cx) ** 2 + (p.y - c.cy) ** 2 <= c.r * c.r) { castSkill(world, c.id); return; }
+  // 技能槽 → 释放（只认已学的）
+  for (const c of skillSlots()) {
+    if (c.learned && (p.x - c.cx) ** 2 + (p.y - c.cy) ** 2 <= c.r * c.r) { castSkill(world, c.id); return; }
   }
 });
 
@@ -401,9 +407,19 @@ function drawWeaponCard() {
   }
 }
 
-// 技能槽：圆形竖排在武器卡下方，右下角等级角标；只显示已学会的技能
+// 技能槽：圆形竖排在武器卡下方，共 4 个；未学的画空占位框（参考原图的暗色空圆）
 function drawSkillSlots() {
-  for (const c of skillCircles()) {
+  for (const c of skillSlots()) {
+    if (!c.learned) {
+      // 空占位框：暗底 + 虚线描边，无文字无角标
+      ctx.fillStyle = 'rgba(14,20,36,0.75)';
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(90,110,150,0.55)'; ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.stroke();
+      ctx.setLineDash([]);
+      continue;
+    }
     const sk = SKILLS[c.id];
     const slot = world.skills[c.id];
     ctx.fillStyle = 'rgba(18,26,44,0.92)';
