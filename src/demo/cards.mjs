@@ -15,14 +15,18 @@
 
 export const MAX_LEVEL = 20; // 一局 20 次三选一（03 册）
 
-// 经验曲线：指数（前期升级快、中后期放缓——用户参考《向僵尸开炮》的手感）
-//   req(Lv) = 20 × 1.32^(Lv-1)
-// 三个校准目标（由 src/demo/balance-sim.mjs 无头模拟验证）：
-//   · 第 1 级需求 20xp = 2 只僵尸 → 第 1 波杀 2 只就升 Lv2
-//   · 累计到 Lv9 ≈ 503xp，落在第 3 波的供给区间（408~703）→ 第 3 波内 Lv9
-//   · 累计到 Lv20 ≈ 12100xp，落在第 19 波供给区间（11453~12548）→ 第 19 波内满级，第 20 波收尾
-export const XP = { base: 20, ratio: 1.32 };
-export function xpForLevel(level) { return Math.round(XP.base * Math.pow(XP.ratio, level - 1)); }
+// 经验曲线丙（2026-11-02 用户拍板）：折中节奏——前快于均匀、慢于旧快开局。
+// 锚点（由 src/demo/balance-sim.mjs 按当前难度供给校准）：
+//   · req(1)=20 → 第 1 波杀 2 只即升 Lv2；首个弹匣（~15s，≈140xp）内最多 Lv3
+//   · 第 3 波末（供给≈1026xp）→ Lv6（S(6)=890 ≤ 1026 < S(7)=1390）
+//   · 第 9 波末（供给≈4947xp）→ Lv12（S(11)=4980，差 33xp，第 10 波开局即满 Lv12）
+//   · 第 19 波末（供给≈15102xp）→ Lv20（S(20)=14962）
+// 表为「Lv → 升下一级所需 xp」；难度参数若再调，重跑 balance-sim 复核锚点。
+export const XP_TABLE = [
+  20, 58, 85, 115, 200, 280, 400, 420, 450, 485, 530,    // Lv1→11
+  620, 690, 760, 840, 930, 1030, 1140, 1280,             // Lv12→20
+];
+export function xpForLevel(level) { return XP_TABLE[Math.min(level, XP_TABLE.length) - 1] ?? XP_TABLE[XP_TABLE.length - 1]; }
 
 // 某条线（武器 / 某个技能）的等级 → 该线卡片的出现权重
 export function lineDecay(level) {

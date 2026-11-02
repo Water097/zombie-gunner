@@ -271,7 +271,7 @@ console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
   lightweight.apply(m2);
   ok('轻量化 射速+60%（显著高于白给卡 +25%）伤害×0.85', m2.fireRate === 1.6 && m2.bulletDamage === 0.85);
   ok('首级经验需求 = 20（2 只僵尸即升 Lv2）', xpForLevel(1) === 20);
-  ok('经验曲线指数增长（第 19 波内满级已由 balance-sim 验证）', xpForLevel(2) > xpForLevel(1) && xpForLevel(19) > xpForLevel(18));
+  ok('经验曲线表单调递增（锚点由 balance-sim 验证：第3波Lv6、第19波内满级）', xpForLevel(2) > xpForLevel(1) && xpForLevel(19) > xpForLevel(18));
   ok('弹头改良仍为白给 +60%', bulletDmg.text.includes('+60%'));
 }
 

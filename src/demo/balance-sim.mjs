@@ -1,100 +1,109 @@
-// 无头平衡模拟：跑完整一局，校准「经验曲线 ↔ 20 波结构」
-// 目标（用户约定）：共 20 波、20 级；**第 19 波前后升到 20 级**，第 20 波用于收尾。
-// 原 ×1.35 指数曲线太陡（实测 24 波还不到 20 级），改为线性后由此脚本校准 base/step。
+// 无头平衡模拟：跑完整一局，校准「难度压迫感 ↔ 经验曲线 ↔ 海克斯选择质量」
 //
-// 运行：node src/demo/balance-sim.mjs
+// 三条校准目标（用户 2026-11-02 拍板）：
+//  1. 经验曲线丙：第 1 波杀 2 只升 Lv2（第一个弹匣内不超过 Lv3）· 第 3 波 Lv6 · 第 9 波 Lv12 · 第 19 波内 Lv20
+//  2. 压迫感：正确选卡的玩家能通关但要塞明显掉血；乱选的玩家应大概率失守
+//  3. 海克斯选择质量必须"有意义"——smart 与 random 的通关率差就是选择价值的量化
+//
+// 运行：node src/demo/balance-sim.mjs [--supply]
 
 import { createWorld, update, chooseCard, RUN } from './combat-core.mjs';
-import { XP, MAX_LEVEL } from './cards.mjs';
+import { MAX_LEVEL } from './cards.mjs';
 
 const STEP = 16;
+const RUNS_PER_STRATEGY = 12;
 
-// 模拟一个合理玩家：先学技能，再优先武器伤害，其次射速，再次技能强化
-const PRIORITY = [
-  'bullet-dmg', 'bullet-rate', 'bullet-pierce',
-  'burn-dmg', 'freeze-dur', 'shock-dur',
-  'burn-radius', 'freeze-cd', 'shock-cd',
-  'combust', 'icebreak', 'conductor', 'crossfire',
+// ── 选卡策略 ──
+// smart：专精流——武器伤害为主轴，专注冰系一条线（干冰弹→极寒延长→制冷回路→破冰），
+//        有对应放大器就吃。代表"正确选择海克斯"的玩家。
+const SMART_PRIORITY = [
+  'bullet-dmg', 'bullet-dmg',           // 伤害主轴（允许重复优先）
+  'learn-freeze',                        // 专精冰系
+  'icebreak',                            // 放大器直接跟线
+  'freeze-dur', 'freeze-cd',
+  'bullet-rate', 'bullet-pierce',
+  'combust', 'conductor', 'crossfire',   // 其他放大器（拿了也不亏）
+  'burn-dmg', 'shock-dur', 'burn-radius', 'freeze-cd',
   'highpressure', 'rapidlearn', 'lightweight',
 ];
-function autoPick(world) {
+function pickSmart(world) {
   const cards = world.pendingCards;
   const learn = cards.find((c) => c.kind === 'learn');
   if (learn && Object.keys(world.skills).length < 3) return cards.indexOf(learn);
-  for (const id of PRIORITY) {
+  for (const id of SMART_PRIORITY) {
     const i = cards.findIndex((c) => c.id === id);
     if (i >= 0) return i;
   }
   return 0;
 }
+function pickRandom(world) {
+  return Math.floor(Math.random() * world.pendingCards.length);
+}
+const STRATEGIES = { smart: pickSmart, random: pickRandom };
 
-function runOne(seedLabel) {
+function runOne(strategy) {
   const w = createWorld();
   w.running = true; w.started = true;
-  const levelAtWave = {};       // 波次开始时的等级
-  const xpAtWave = {};          // 波次开始时的累计经验供给
-  const killsAtWave = {};       // 波次开始时的累计击杀
+  const levelAtWave = {};
+  const xpAtWave = {};
   let lastWave = 0;
+  let fortressMin = w.fortressHp;   // 过程最低血量：真正的压迫感指标
   let guard = 0;
   while (!w.gameOver && guard++ < 60000) {
-    if (w.cardPhase) { chooseCard(w, autoPick(w)); continue; }
+    if (w.cardPhase) { chooseCard(w, STRATEGIES[strategy](w)); continue; }
     if (w.wave !== lastWave) {
       levelAtWave[w.wave] = w.level;
       xpAtWave[w.wave] = Math.round(w.xpGained);
-      killsAtWave[w.wave] = w.killCount;
       lastWave = w.wave;
     }
     update(w, STEP);
+    if (w.fortressHp < fortressMin) fortressMin = w.fortressHp;
   }
   return {
-    label: seedLabel,
-    won: w.won,
-    finalLevel: w.level,
-    wave: w.wave,
-    kills: w.killCount,
-    xp: Math.round(w.xpGained),
-    fortressHp: Math.round(w.fortressHp),
-    seconds: Math.round(w.time / 1000),
-    levelAtWave, xpAtWave, killsAtWave,
+    won: w.won, finalLevel: w.level, wave: w.wave, kills: w.killCount,
+    xp: Math.round(w.xpGained), fortressHp: Math.round(w.fortressHp), fortressMin: Math.round(fortressMin),
+    seconds: Math.round(w.time / 1000), levelAtWave, xpAtWave,
+    dpsProxy: Math.round(w.mods.bulletDamage * w.mods.fireRate * 100) / 100,
+    taken: w.cardStacks ? Object.entries(w.cardStacks).map(([k, v]) => `${k}×${v}`).join(' ') : '',
   };
 }
 
-console.log(`经验曲线：xpNext = ${XP.base} × ${XP.ratio}^(Lv-1)   目标：Lv2=杀2只 · 第3波内Lv9 · 第19波内Lv20\n`);
+function runStrategy(name) {
+  const runs = [];
+  for (let i = 0; i < RUNS_PER_STRATEGY; i++) runs.push(runOne(name));
+  const wins = runs.filter((r) => r.won).length;
+  const fhp = runs.filter((r) => r.won).map((r) => r.fortressMin);
+  const avgFhp = fhp.length ? Math.round(fhp.reduce((a, b) => a + b, 0) / fhp.length) : '-';
+  const losses = runs.filter((r) => !r.won).map((r) => `第${r.wave}波失守(Lv${r.finalLevel})`);
+  console.log(`【${name}】通关 ${wins}/${runs.length} · 通关局过程最低要塞血 ${fhp.join(',') || '-'}（均 ${avgFhp}/300）${losses.length ? `\n    失守：${losses.join(' / ')}` : ''}`);
+  for (const r of runs.slice(0, 3)) console.log(`    样本 DPS代理=${r.dpsProxy} 卡：${r.taken}`);
+  return { runs, wins };
+}
 
-const runs = [];
-for (let i = 0; i < 5; i++) runs.push(runOne(`第 ${i + 1} 局`));
+const smart = runStrategy('smart');
+const random = runStrategy('random');
 
-console.log('每波开始时的等级：');
-for (const r of runs) {
+// ── 经验曲线校验（丙）：看 smart 局各波开始时的等级 ──
+console.log('\nsmart 局各波开始时的等级（目标：第3波Lv6 / 第9波Lv12 / 第19波内Lv20）：');
+for (const r of smart.runs) {
   const seq = [];
   for (let wv = 1; wv <= RUN.maxWave; wv++) seq.push(r.levelAtWave[wv] ?? '-');
-  console.log(`  ${r.label}: [${seq.join(' ')}]`);
+  console.log(`  ${r.won ? '✓' : '✗'} [${seq.join(' ')}]`);
 }
+const lv3 = smart.runs.map((r) => r.levelAtWave[3] ?? r.finalLevel);
+const lv9 = smart.runs.map((r) => r.levelAtWave[9] ?? r.finalLevel);
+const lv19 = smart.runs.map((r) => r.levelAtWave[19] ?? r.finalLevel);
+const avg = (a) => (a.reduce((x, y) => x + y, 0) / a.length).toFixed(1);
+console.log(`\n第3波均 Lv${avg(lv3)}（目标 6）· 第9波均 Lv${avg(lv9)}（目标 12）· 第19波开始均 Lv${avg(lv19)}（19 波内满级 → 目标 <20 且第19波内到20）`);
 
-console.log('\n汇总：');
-for (const r of runs) {
-  console.log(`  ${r.label}: ${r.won ? '通关' : '失守'} · 最终 Lv${r.finalLevel} · 到第 ${r.wave} 波 · 击杀 ${r.kills} · 要塞剩 ${r.fortressHp} · 用时 ${r.seconds}s`);
-}
-
-// 判定：第 19 波时的等级应 ≥19（即第 19 波前后到 20 级）
-const at19 = runs.map((r) => r.levelAtWave[19] ?? r.finalLevel);
-const avg19 = at19.reduce((a, b) => a + b, 0) / at19.length;
-console.log(`\n第 19 波开始时的等级：${at19.join(', ')}  平均 ${avg19.toFixed(1)}（目标 ≈19，即第 19 波内升到 20）`);
-const wins = runs.filter((r) => r.won).length;
-console.log(`通关率：${wins}/${runs.length}`);
-
-// ── 经验供给曲线（curve-fit 用）：各波开始时的累计经验供给 ──
-console.log('\n经验供给（各波开始时累计 xp）：');
-const SUPPLY_WAVES = process.argv.includes('--supply');
-if (SUPPLY_WAVES) {
-  const winners = runs.filter((r) => r.won);
-  const pool = winners.length >= 2 ? winners : runs; // 供给形状看通关局（失败局供给冻结）
-  const n = RUN.maxWave;
-  for (let wv = 1; wv <= n; wv++) {
-    const vals = pool.map((r) => r.xpAtWave[wv]).filter((v) => v !== undefined);
+// ── 供给表（曲线拟合用）──
+if (process.argv.includes('--supply')) {
+  console.log('\n经验供给（各波开始时累计 xp，smart 局平均）：');
+  const pool = smart.runs.filter((r) => r.won);
+  const use = pool.length ? pool : smart.runs;
+  for (let wv = 1; wv <= RUN.maxWave; wv++) {
+    const vals = use.map((r) => r.xpAtWave[wv]).filter((v) => v !== undefined);
     if (!vals.length) continue;
-    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
-    const lv = pool.map((r) => r.levelAtWave[wv] ?? r.finalLevel);
-    console.log(`  wave ${String(wv).padStart(2)}: xp=${Math.round(avg).toString().padStart(6)}  lv=${lv.join(',')}`);
+    console.log(`  wave ${String(wv).padStart(2)}: xp=${Math.round(vals.reduce((a, b) => a + b, 0) / vals.length)}`);
   }
 }

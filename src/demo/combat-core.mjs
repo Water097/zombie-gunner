@@ -41,7 +41,8 @@ export const PLAYER = {
 
 // ── 要塞：位于玩家前方，敌人抵达后停在防线前持续攻击（不是撞上去就消失）──
 export const FORTRESS = {
-  maxHp: 100,
+  maxHp: 300,
+  regenPerSec: 2,            // 常驻缓回（设计册"要塞生命回复"）：漏怪掉血可被清场扳回，压迫变成拉锯而非瞬间崩盘
   attackLine: WORLD.H - 152, // 敌人推进到此线即停住，转为攻击姿态
 };
 
@@ -54,9 +55,9 @@ export function petPos(world) {
 // ── 敌人类型（对齐 14 册 targetType 与 04 册出怪纪律）──
 // 新增 atkDmg / atkIntervalMs：抵达要塞后的攻击力与攻击频率
 export const ENEMY_TYPES = {
-  zombie:  { name: '普通僵尸', targetType: 'normal',  hp: 60,  speed: 14, radius: 16, color: '#7fb069', score: 60,  xp: 10, atkDmg: 6,  atkIntervalMs: 1500 },
-  runner:  { name: '疾行尸',   targetType: 'normal',  hp: 40,  speed: 30, radius: 12, color: '#e9c46a', score: 45,  xp: 12, atkDmg: 5,  atkIntervalMs: 1200 },
-  armored: { name: '装甲尸车', targetType: 'armored', hp: 300, speed: 10, radius: 24, color: '#577590', score: 200, xp: 40, atkDmg: 14, atkIntervalMs: 2000, vehicleLevel: 20 },
+  zombie:  { name: '普通僵尸', targetType: 'normal',  hp: 60,  speed: 14, radius: 16, color: '#7fb069', score: 60,  xp: 10, atkDmg: 4,  atkIntervalMs: 1500 },
+  runner:  { name: '疾行尸',   targetType: 'normal',  hp: 40,  speed: 30, radius: 12, color: '#e9c46a', score: 45,  xp: 12, atkDmg: 3,  atkIntervalMs: 1200 },
+  armored: { name: '装甲尸车', targetType: 'armored', hp: 300, speed: 10, radius: 24, color: '#577590', score: 200, xp: 40, atkDmg: 9, atkIntervalMs: 2000, vehicleLevel: 20 },
 };
 
 // ── 三技能（9 技能里的代表：冰弹穿透 / 温压爆炸 / 电磁雷击）──
@@ -149,6 +150,7 @@ export function createWorld() {
     mercyUsed: false,
     fortressHp: FORTRESS.maxHp,
     fortressMaxHp: FORTRESS.maxHp,
+    fortressRegenHold: 0,   // 受击后回血暂停计时
     fortressFlash: 0,
     spawnTimer: 700,
     wave: 1,
@@ -189,14 +191,22 @@ function addRing(world, x, y, maxR, color) {
 function spawnEnemy(world, typeKey) {
   const t = ENEMY_TYPES[typeKey];
   const lane = 40 + Math.random() * (WORLD.W - 80);
+  // ── 波次缩放（压迫感核心旋钮）：血量/速度/攻击随波次成长，玩家输出必须跟上海克斯选择质量 ──
+  const wv = world.wave;
+  // 血量超线性：前期温和、第 10 波起陡增——混搭乱选的 DPS 跟不上，专精+放大器才行
+  const hpScale = 1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45;  // 第20波 ≈ 2.8×
+  const spdScale = Math.min(1.5, 1 + (wv - 1) * 0.025);
+  const atkScale = 1 + (wv - 1) * 0.06;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
   world.enemies.push({
     id: _idSeq++,
     type: typeKey,
     ...t,
     x: lane,
     y: -30,
-    hp: t.hp,
-    maxHp: t.hp,
+    hp: Math.round(t.hp * hpScale),
+    maxHp: Math.round(t.hp * hpScale),
+    speed: t.speed * spdScale,
+    atkDmg: Math.round(t.atkDmg * atkScale),
     st: makeEnemy(t.targetType),
     alive: true,
     hitFlash: 0,
@@ -308,6 +318,7 @@ export function chooseCard(world, idx) {
 function damageFortress(world, dmg, enemy) {
   world.fortressHp = Math.max(0, world.fortressHp - dmg);
   world.fortressFlash = 220;
+  world.fortressRegenHold = 3000; // 受击后 3 秒内不回血（防止边啃边回显得假）
   addFloater(world, world.player.x + (Math.random() * 40 - 20), world.player.y - 30, `-${dmg}`, '#ff6b6b');
   for (let i = 0; i < 6; i++) {
     const a = Math.random() * Math.PI * 2, sp = 40 + Math.random() * 90;
@@ -422,9 +433,10 @@ export function update(world, dtMs) {
   const timeUp = world.time > RUN.maxWave * RUN.waveMs;
   world.spawnTimer -= dtMs;
   if (!timeUp && world.spawnTimer <= 0) {
-    const batch = 1 + (Math.random() < 0.3 ? 1 : 0);
+    // 出怪密度随波次抬升：基础 1~2 只，第 8 波起有概率三连出
+    const batch = 1 + (Math.random() < 0.3 ? 1 : 0) + (world.wave >= 8 && Math.random() < 0.25 ? 1 : 0);
     for (let i = 0; i < batch; i++) spawnEnemy(world, pickEnemyType(world));
-    const speedUp = Math.max(420, 900 - world.wave * 22);
+    const speedUp = Math.max(400, 960 - world.wave * 26);
     world.spawnTimer = speedUp;
     if (world.time > world.wave * RUN.waveMs) world.wave += 1;
   }
@@ -534,6 +546,11 @@ export function update(world, dtMs) {
   for (const f of world.floaters) { f.y -= 22 * (dtMs / 1000); f.life -= dtMs; }
   for (const r of world.rings) { r.r += (r.maxR - r.r) * 0.18; r.life -= dtMs; }
   if (world.fortressFlash > 0) world.fortressFlash -= dtMs;
+  // 要塞常驻缓回：脱战 3 秒后按 regenPerSec 回复（解耦清波的回血机制，设计册基准）
+  if (world.fortressRegenHold > 0) world.fortressRegenHold -= dtMs;
+  else if (world.fortressHp > 0 && world.fortressHp < world.fortressMaxHp) {
+    world.fortressHp = Math.min(world.fortressMaxHp, world.fortressHp + (FORTRESS.regenPerSec * dtMs) / 1000);
+  }
   if (world.petFlash > 0) world.petFlash -= dtMs;
 
   // ── 清理死亡实体 ──
