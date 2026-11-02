@@ -8,7 +8,7 @@ import {
   createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
   PLAYER, ENEMY_TYPES, FORTRESS,
 } from './combat-core.mjs';
-import { LEARN_CARDS } from './cards.mjs';
+import { LEARN_CARDS, xpForLevel } from './cards.mjs';
 import { makeEnemy, apply, has } from '../status/status-system.mjs';
 
 let passed = 0, failed = 0;
@@ -257,6 +257,22 @@ console.log('— 回归：子弹击杀触发 onDeath（修复宿主/包装分叉
   } catch (err) { threw = true; console.log('    抛错:', err && err.message); }
   ok('击杀路径未抛异常（onDeath 收到宿主 .st）', !threw);
   ok('敌人被击杀并移除', removed);
+}
+
+console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
+{
+  const crossfire = CARDS.find((c) => c.id === 'crossfire');
+  const lightweight = CARDS.find((c) => c.id === 'lightweight');
+  const bulletDmg = CARDS.find((c) => c.id === 'bullet-dmg');
+  const m1 = createWorld().mods;
+  crossfire.apply(m1);
+  ok('交叉火力单层 +100%（≈无条件卡 1.67 倍，条件卡溢价）', m1.crossfire === 2);
+  const m2 = createWorld().mods;
+  lightweight.apply(m2);
+  ok('轻量化 射速+60%（显著高于白给卡 +25%）伤害×0.85', m2.fireRate === 1.6 && m2.bulletDamage === 0.85);
+  ok('首级经验需求 = 20（2 只僵尸即升 Lv2）', xpForLevel(1) === 20);
+  ok('经验曲线指数增长（第 19 波内满级已由 balance-sim 验证）', xpForLevel(2) > xpForLevel(1) && xpForLevel(19) > xpForLevel(18));
+  ok('弹头改良仍为白给 +60%', bulletDmg.text.includes('+60%'));
 }
 
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);

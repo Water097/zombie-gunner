@@ -136,6 +136,8 @@ export function createWorld() {
     level: 1,
     xp: 0,
     xpNext: xpForLevel(1),
+    xpGained: 0,          // 累计获得经验（balance-sim 校准供给用）
+    lastCardLevel: 1,     // 上次弹选卡的等级（级联升级只弹一次）
     won: false,
     pendingCards: [],
     cardPhase: false,
@@ -255,14 +257,21 @@ function killEnemy(world, enemy, scored = true) {
 // ── 经验 / 升级（03 册一节：经验来自击杀，每波保证至少升一级）──
 function gainXp(world, amount) {
   world.xp += amount * world.mods.xpRate;
-  if (world.xp >= world.xpNext && world.level < MAX_LEVEL) {
+  world.xpGained += amount * world.mods.xpRate; // 供给计量（balance-sim 校准用）
+  // 级联升级：一只怪的经验可能跨多级（如前期装甲尸车 40xp vs 首级 20xp）
+  while (world.xp >= world.xpNext && world.level < MAX_LEVEL) {
     world.xp -= world.xpNext;
     world.level += 1;
     world.xpNext = xpForLevel(world.level);
-    world.pendingCards = rollCards(world);
-    world.cardPhase = true;   // 暂停战斗，等玩家选卡
-  } else if (world.xp >= world.xpNext) {
+  }
+  if (world.xp >= world.xpNext) {
     world.xp = world.xpNext;  // 已满级，经验条封顶
+    return;
+  }
+  if (world.level > world.lastCardLevel) {
+    world.lastCardLevel = world.level;
+    world.pendingCards = rollCards(world);
+    world.cardPhase = true;   // 暂停战斗，等玩家选卡（级联只弹一次）
   }
 }
 

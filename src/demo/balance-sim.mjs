@@ -32,11 +32,18 @@ function runOne(seedLabel) {
   const w = createWorld();
   w.running = true; w.started = true;
   const levelAtWave = {};       // 波次开始时的等级
+  const xpAtWave = {};          // 波次开始时的累计经验供给
+  const killsAtWave = {};       // 波次开始时的累计击杀
   let lastWave = 0;
   let guard = 0;
   while (!w.gameOver && guard++ < 60000) {
     if (w.cardPhase) { chooseCard(w, autoPick(w)); continue; }
-    if (w.wave !== lastWave) { levelAtWave[w.wave] = w.level; lastWave = w.wave; }
+    if (w.wave !== lastWave) {
+      levelAtWave[w.wave] = w.level;
+      xpAtWave[w.wave] = Math.round(w.xpGained);
+      killsAtWave[w.wave] = w.killCount;
+      lastWave = w.wave;
+    }
     update(w, STEP);
   }
   return {
@@ -45,13 +52,14 @@ function runOne(seedLabel) {
     finalLevel: w.level,
     wave: w.wave,
     kills: w.killCount,
+    xp: Math.round(w.xpGained),
     fortressHp: Math.round(w.fortressHp),
     seconds: Math.round(w.time / 1000),
-    levelAtWave,
+    levelAtWave, xpAtWave, killsAtWave,
   };
 }
 
-console.log(`经验曲线：xpNext = ${XP.base} + (Lv-1) × ${XP.step}   目标：Lv20 出现在第 19 波前后\n`);
+console.log(`经验曲线：xpNext = ${XP.base} × ${XP.ratio}^(Lv-1)   目标：Lv2=杀2只 · 第3波内Lv9 · 第19波内Lv20\n`);
 
 const runs = [];
 for (let i = 0; i < 5; i++) runs.push(runOne(`第 ${i + 1} 局`));
@@ -74,3 +82,19 @@ const avg19 = at19.reduce((a, b) => a + b, 0) / at19.length;
 console.log(`\n第 19 波开始时的等级：${at19.join(', ')}  平均 ${avg19.toFixed(1)}（目标 ≈19，即第 19 波内升到 20）`);
 const wins = runs.filter((r) => r.won).length;
 console.log(`通关率：${wins}/${runs.length}`);
+
+// ── 经验供给曲线（curve-fit 用）：各波开始时的累计经验供给 ──
+console.log('\n经验供给（各波开始时累计 xp）：');
+const SUPPLY_WAVES = process.argv.includes('--supply');
+if (SUPPLY_WAVES) {
+  const winners = runs.filter((r) => r.won);
+  const pool = winners.length >= 2 ? winners : runs; // 供给形状看通关局（失败局供给冻结）
+  const n = RUN.maxWave;
+  for (let wv = 1; wv <= n; wv++) {
+    const vals = pool.map((r) => r.xpAtWave[wv]).filter((v) => v !== undefined);
+    if (!vals.length) continue;
+    const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const lv = pool.map((r) => r.levelAtWave[wv] ?? r.finalLevel);
+    console.log(`  wave ${String(wv).padStart(2)}: xp=${Math.round(avg).toString().padStart(6)}  lv=${lv.join(',')}`);
+  }
+}

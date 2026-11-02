@@ -453,7 +453,7 @@ function drawCardOverlay() {
   ctx.fillStyle = '#eaf2ff'; ctx.textAlign = 'center'; ctx.font = 'bold 22px sans-serif';
   ctx.fillText(`升级！Lv ${world.level}`, WORLD.W / 2, 250);
   ctx.fillStyle = '#aeb9d0'; ctx.font = '12px sans-serif';
-  ctx.fillText('选一张', WORLD.W / 2, 274);
+  ctx.fillText('选择海克斯强化', WORLD.W / 2, 274);
 
   const rects = cardRects();
   rects.forEach((r) => {
@@ -488,7 +488,7 @@ function drawStartOverlay() {
   ctx.font = '14px sans-serif'; ctx.fillStyle = '#aeb9d0';
   ctx.fillText('开局只有主武器子弹，技能要靠选卡学会', WORLD.W / 2, WORLD.H / 2 - 22);
   ctx.fillText('武器只管射击与换弹（弹匣 30）· R 换弹', WORLD.W / 2, WORLD.H / 2 + 2);
-  ctx.fillText('技能由右侧宠物机器人自动释放', WORLD.W / 2, WORLD.H / 2 + 26);
+  ctx.fillText('技能由右侧宠物机器人自动释放 · 升级三选一 = 海克斯', WORLD.W / 2, WORLD.H / 2 + 26);
   ctx.fillText(`共 ${RUN.maxWave} 波 · 20 级 · 第 ${RUN.maxWave} 波收尾`, WORLD.W / 2, WORLD.H / 2 + 50);
   ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 16px sans-serif';
   ctx.fillText('点击屏幕开始', WORLD.W / 2, WORLD.H / 2 + 96);

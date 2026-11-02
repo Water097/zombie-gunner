@@ -15,11 +15,14 @@
 
 export const MAX_LEVEL = 20; // 一局 20 次三选一（03 册）
 
-// 经验曲线：线性（原 ×1.35 指数太陡，实测 24 波都到不了 20 级）
-// 与刷怪量锁死（03 册一节）：目标 = 每波约升 1 级，第 19 波前后到 20 级，第 20 波收尾。
-// 数值由 src/demo/balance-sim.mjs 无头模拟校准。
-export const XP = { base: 162, step: 45 };
-export function xpForLevel(level) { return Math.round(XP.base + (level - 1) * XP.step); }
+// 经验曲线：指数（前期升级快、中后期放缓——用户参考《向僵尸开炮》的手感）
+//   req(Lv) = 20 × 1.32^(Lv-1)
+// 三个校准目标（由 src/demo/balance-sim.mjs 无头模拟验证）：
+//   · 第 1 级需求 20xp = 2 只僵尸 → 第 1 波杀 2 只就升 Lv2
+//   · 累计到 Lv9 ≈ 503xp，落在第 3 波的供给区间（408~703）→ 第 3 波内 Lv9
+//   · 累计到 Lv20 ≈ 12100xp，落在第 19 波供给区间（11453~12548）→ 第 19 波内满级，第 20 波收尾
+export const XP = { base: 20, ratio: 1.32 };
+export function xpForLevel(level) { return Math.round(XP.base * Math.pow(XP.ratio, level - 1)); }
 
 // 某条线（武器 / 某个技能）的等级 → 该线卡片的出现权重
 export function lineDecay(level) {
@@ -66,20 +69,24 @@ export const CARDS = [
     apply: (m) => { m.shockDurBonus += 1500; } },
 
   // ── 加成卡 A 类：放大器（要求对应技能已学，否则是废卡）──
+  // 强度纪律：条件卡 ≈ 同类无条件卡的 1.5~2 倍（补偿覆盖率；条件越苛刻倍率越高）
   { id: 'icebreak', kind: 'bonus', target: 'freeze', name: '破冰', text: '对【冻结】目标伤害 +30%',
     apply: (m) => { m.dmgVsFrozen += 0.3; } },
   { id: 'combust', kind: 'bonus', target: 'burn', name: '助燃', text: '对【燃烧】目标伤害 +35%',
     apply: (m) => { m.dmgVsBurn += 0.35; } },
   { id: 'conductor', kind: 'bonus', target: 'shock', name: '导电体', text: '对【感电】目标伤害 +25%',
     apply: (m) => { m.dmgVsShock += 0.25; } },
-  { id: 'crossfire', kind: 'bonus', target: 'weapon', name: '交叉火力', text: '场上敌人 ≥8 时【子弹】伤害 +30%',
-    apply: (m) => { m.crossfire += 0.3; } },
+  { id: 'crossfire', kind: 'bonus', target: 'weapon', name: '交叉火力', text: '场上敌人 ≥8 时【子弹】伤害 +100%',
+    apply: (m) => { m.crossfire += 1.0; } },
 
   // ── 加成卡 B 类：代价型 ──
+  // 代价卡定价纪律（2026-11-02 用户提出）：收益必须显著高于同类白给卡，否则是废卡。
+  //   轻量化 +60% 射速 vs 枪机轻量化白给 +25% —— 溢价 +35% 才对得起 -15% 伤害。
+  //   [PLACEHOLDER · 数值阶段统一复核全部代价卡]
   { id: 'highpressure', kind: 'bonus', target: 'weapon', name: '高压弹仓', text: '【子弹】伤害 +35%，换弹时间 +25%',
     apply: (m) => { m.bulletDamage += 0.35; m.reloadMul *= 1.25; } },
-  { id: 'lightweight', kind: 'bonus', target: 'weapon', name: '轻量化', text: '【子弹】射速 +30%，伤害 -15%',
-    apply: (m) => { m.fireRate += 0.3; m.bulletDamage *= 0.85; } },
+  { id: 'lightweight', kind: 'bonus', target: 'weapon', name: '轻量化', text: '【子弹】射速 +60%，伤害 -15%',
+    apply: (m) => { m.fireRate += 0.6; m.bulletDamage *= 0.85; } },
 
   // ── 加成卡 C 类：资源型 ──
   { id: 'rapidlearn', kind: 'bonus', target: null, name: '快速学习', text: '经验获取 +25%',
