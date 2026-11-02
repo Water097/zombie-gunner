@@ -69,6 +69,28 @@ export const CARDS = [
   { id: 'bullet-pierce', kind: 'weapon', target: 'weapon', name: '穿甲弹头', text: '【子弹】穿透 +1',
     apply: (m) => { m.pierceBonus += 1; } },
 
+  // ── 子弹属性卡（06 册 §3.2.1）：命中行为，只作用主武器子弹，与 9 技能独立 ──
+  // 纪律：① 显著弱于同名技能（这里是"每发都带的常驻弱版"）② 子子弹不继承火/爆炸 ③ 子子弹不再分裂
+  // 全部一次性；带 once 的修饰卡由 eligible 保证"主卡在手才进池"，不占三选一位发废卡
+  { id: 'bullet-fire', kind: 'weapon', target: 'weapon', name: '火属性弹头', once: true,
+    text: '【子弹】命中附加灼烧：每秒 8% 子弹伤害，持续 2 秒',
+    apply: (m) => { m.bulletFire = 1; } },
+  { id: 'bullet-explode', kind: 'weapon', target: 'weapon', name: '爆炸弹头', once: true,
+    text: '【子弹】命中产生小爆炸：12% 子弹伤害，半径 35',
+    apply: (m) => { m.bulletExplode = 1; } },
+  { id: 'bullet-explode-range', kind: 'weapon', target: 'weapon', name: '爆破增程', once: true,
+    text: '【子弹】爆炸半径 ×2（35→70），子子弹爆炸同样受益',
+    apply: (m) => { m.bulletExplodeMul = 2; } },
+  { id: 'bullet-split', kind: 'weapon', target: 'weapon', name: '分裂子弹', once: true,
+    text: '【子弹】命中分裂 2-4 颗子子弹（20% 伤害，锥角飞出 90）',
+    apply: (m) => { m.bulletSplit = 1; } },
+  { id: 'bullet-sub-dmg', kind: 'weapon', target: 'weapon', name: '子母弹强化', once: true,
+    text: '【子弹】子子弹伤害 +30%（20%→26%）',
+    apply: (m) => { m.subDmgMul = 1.3; } },
+  { id: 'bullet-sub-boom', kind: 'weapon', target: 'weapon', name: '子子弹爆炸', once: true,
+    text: '【子弹】子子弹命中爆炸：30% 子伤，半径 25',
+    apply: (m) => { m.subExplode = 1; } },
+
   // ── 技能卡：只出已学技能的卡（03 册：当局池只出你已学技能的卡）──
   { id: 'freeze-cd', kind: 'skill', target: 'freeze', name: '制冷回路', text: '【干冰弹】冷却 -25%',
     apply: (m) => { m.skillCdMul.freeze *= 0.75; } },
@@ -151,6 +173,13 @@ export const MERCY_CARD = {
 };
 
 // 卡是否可进池
+// 修饰卡 → 所需主卡（mods 字段）。主卡不在手时，修饰卡不进池。
+const BULLET_TRAIT_REQ = {
+  'bullet-explode-range': 'bulletExplode',
+  'bullet-sub-dmg': 'bulletSplit',
+  'bullet-sub-boom': 'bulletSplit',
+};
+
 function eligible(world, c) {
   if (c.kind === 'bonus' && world.bonusTaken >= bonusBudget(world.level)) return false;
   if (c.kind === 'skill' && !world.skills[c.target]) return false;              // 只出已学技能
@@ -162,6 +191,10 @@ function eligible(world, c) {
   }
   // 一次性质变卡（弹射电弧 / 雷暴）：拿过就不再进池
   if (c.once && (world.cardStacks[c.id] || 0) >= 1) return false;
+  // 子弹属性卡的修饰卡：主卡不在手就不进池（06 册说"修饰卡自身不生效"，
+  // Demo 选择不发废卡——抽到一张不生效的卡比抽到弱卡更伤口碑）
+  const traitReq = BULLET_TRAIT_REQ[c.id];
+  if (traitReq && !world.mods?.[traitReq]) return false;
   // 有层数上限的卡（弹道 / 连发 各 3 层）：到顶后不再进池，避免发到"看不出效果"的废卡
   if (c.maxStacks && (world.cardStacks[c.id] || 0) >= c.maxStacks) return false;
   return true;

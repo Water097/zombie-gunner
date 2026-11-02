@@ -6,10 +6,10 @@
 
 import {
   createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
-  PLAYER, ENEMY_TYPES, FORTRESS, bulletsPerShot, pelletFactor,
+  PLAYER, ENEMY_TYPES, FORTRESS, SKILLS, bulletsPerShot, pelletFactor,
 } from './combat-core.mjs';
 import { LEARN_CARDS, xpForLevel, rollCards } from './cards.mjs';
-import { makeEnemy, apply, has } from '../status/status-system.mjs';
+import { makeEnemy, apply, has, read } from '../status/status-system.mjs';
 
 let passed = 0, failed = 0;
 function ok(name, cond) {
@@ -534,6 +534,7 @@ console.log('— 装甲车：出场 / 多段冲撞 / 击退 / 减速 —');
   stopFire(w);
   const e = makeEnemyEntity('zombie', 225, 500);
   e.id = 201; e.hp = 9999; e.maxHp = 9999;
+  e.speed = 0; // 隔离自身推进：3 秒窗口内只观察"载具把敌人推回"，不掺入敌人自己往要塞走
   w.enemies.push(e);
 
   ok('施放成功', castSkill(w, 'vehicle') === true);
@@ -542,16 +543,39 @@ console.log('— 装甲车：出场 / 多段冲撞 / 击退 / 减速 —');
 
   const drops = [];
   let last = e.hp;
+  let everSlowed = false; // 减速只持续 2s，6.4s 窗口末已过期，故记录"曾经进入过"
   const yStart = e.y;
-  for (let i = 0; i < 130; i++) { // ≈2.1s：够车从要塞碾过 y=500
+  for (let i = 0; i < 400; i++) { // ≈6.4s：覆盖 lifeMs(5200) + 出场延迟，确保走完全程离场
     update(w, 16);
+    if (has(e.st, 'slow')) everSlowed = true;
     if (e.hp < last) { drops.push(Math.round((last - e.hp) * 100) / 100); last = e.hp; }
   }
   ok('造成多段伤害（≥3 段）', drops.length >= 3);
   ok('单段伤害 = 基础 17（无卡）', drops[0] === 17);
   ok('敌人被推回（y 减小）', e.y < yStart);
-  ok('敌人进入减速', has(e.st, 'slow'));
+  ok('敌人进入减速', everSlowed);
   ok('载具最终离场', w.vehicles.length === 0);
+}
+
+console.log('— 装甲车：判定 = 车身矩形 + 速度减半（2026-11-02 粗调）—');
+{
+  ok('车速 420 → 210（调低一倍）', SKILLS.vehicle.speed === 210);
+  const w = createWorld(); w.running = true;
+  w.enemies.length = 0;
+  // 手摆一辆不动的车（vy=0），专门测几何判定
+  w.vehicles.push({
+    x: 225, y: 400, w: SKILLS.vehicle.bodyW, h: SKILLS.vehicle.bodyH,
+    vy: 0, life: 5200, ramp: 0, hitCd: new Map(), knocked: new Set(),
+    firstHit: false, heavy: false, color: SKILLS.vehicle.color,
+  });
+  const inside = makeEnemyEntity('zombie', 225, 400); inside.id = 901; inside.hp = 999; inside.maxHp = 999;
+  // 60px 侧移：落在旧"半径 90 圆"内，但在车身矩形外（半宽 17 + 敌人半径 12 = 29）
+  const outside = makeEnemyEntity('zombie', 225 + 60, 400); outside.id = 902; outside.hp = 999; outside.maxHp = 999;
+  w.enemies.push(inside, outside);
+  update(w, 16);
+  ok('车身压到的敌人受伤', inside.hp < 999);
+  ok('车身外 60px 的敌人不再受伤（旧圆判定会误伤）', outside.hp === 999);
+  ok('车身长度参与判定（y 向也收紧）', SKILLS.vehicle.bodyH < 180);
 }
 
 console.log('— 装甲车：② 冲撞次数 +2 —');
@@ -665,6 +689,109 @@ console.log('— 装甲车：学习卡进池 —');
   ok('开局三选一能抽到【装甲车】学习卡', seen > 0);
   const learn = LEARN_CARDS.find((c) => c.target === 'vehicle');
   ok('学习卡文案带主语与形态', /装甲车/.test(learn.text) && /击退|碾/.test(learn.text));
+}
+
+console.log('— 子弹属性卡（06 册 §3.2.1）：火 / 爆炸 / 分裂 —');
+{
+  const noFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
+  const stub = (id, x, y) => {
+    const e = makeEnemyEntity('zombie', x, y);
+    e.id = id; e.hp = 9999; e.maxHp = 9999; e.speed = 0; return e;
+  };
+  const shoot = (w, x, y, dmg) => {
+    w.bullets.push({ x, y, vx: 0, vy: 0, damage: dmg, life: 200, radius: PLAYER.bulletRadius, pierceLeft: 1, hitIds: [] });
+    update(w, 16);
+  };
+  const dmgOf = (e) => Math.round((9999 - e.hp) * 100) / 100;
+
+  // ① 火属性弹头：单目标 DoT，伤害按这颗子弹折算
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const e = stub(301, 225, 300); w.enemies.push(e);
+    w.mods.bulletFire = 1;
+    shoot(w, 225, 300, 20);
+    ok('火属性：命中挂上灼烧', has(e.st, 'burn'));
+    ok('火属性：每秒伤害 = 8% × 子弹伤害（20 → 1.6/s）', Math.abs(read(e.st, 'burn') - 1.6) < 1e-9);
+  }
+  // ② 子子弹不继承火（06 册纪律 3）
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const e = stub(302, 225, 300); w.enemies.push(e);
+    w.mods.bulletFire = 1; w.mods.bulletSplit = 1;
+    w.bullets.push({ x: 225, y: 300, vx: 0, vy: 0, damage: 20, life: 200, radius: 3, pierceLeft: 1, hitIds: [], isSub: true });
+    update(w, 16);
+    ok('子子弹不继承火（isSub 命中不挂灼烧）', !has(e.st, 'burn'));
+  }
+  // ③ 爆炸弹头：命中点 12% @ 35px
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const a = stub(311, 225, 300), b = stub(312, 280, 300); // 55px：在 35+12 之外
+    w.enemies.push(a, b);
+    w.mods.bulletExplode = 1;
+    shoot(w, 225, 300, 100);
+    ok('爆炸弹头：命中目标 = 100 子弹 + 12 爆炸', dmgOf(a) === 112);
+    ok('爆炸弹头：半径 35，55px 外不波及', dmgOf(b) === 0);
+  }
+  // ④ 爆炸范围 +100%：35 → 70
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const a = stub(313, 225, 300), b = stub(314, 280, 300);
+    w.enemies.push(a, b);
+    w.mods.bulletExplode = 1; w.mods.bulletExplodeMul = 2;
+    shoot(w, 225, 300, 100);
+    ok('爆破增程 ×2：70px 内的邻兵吃到 12', dmgOf(b) === 12);
+  }
+  // ⑤ 命中分裂：2-4 颗、20% 伤害、90px 射程
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    w.enemies.push(stub(321, 225, 300));
+    w.mods.bulletSplit = 1;
+    shoot(w, 225, 300, 100);
+    const subs = w.bullets.filter((b) => b.isSub);
+    ok('分裂：产生 2-4 颗子子弹', subs.length >= 2 && subs.length <= 4);
+    ok('分裂：子子弹 = 20% 主伤', Math.abs(subs[0].damage - 20) < 1e-9);
+    ok('分裂：子子弹独立 90px 射程（≈173ms）', Math.abs(subs[0].life - (90 / 520) * 1000) < 1);
+  }
+  // ⑥ 子子弹伤害 +30%：20% → 26%
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    w.enemies.push(stub(331, 225, 300));
+    w.mods.bulletSplit = 1; w.mods.subDmgMul = 1.3;
+    shoot(w, 225, 300, 100);
+    ok('子母弹强化：子子弹 100×20%×1.3 = 26', Math.abs(w.bullets.find((b) => b.isSub).damage - 26) < 1e-9);
+  }
+  // ⑦ 子子弹爆炸：30% 子伤传递（20 → 6）
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const a = stub(341, 225, 300), b = stub(342, 255, 300); // 30px：在 25+12 内
+    w.enemies.push(a, b);
+    w.mods.subExplode = 1;
+    w.bullets.push({ x: 225, y: 300, vx: 0, vy: 0, damage: 20, life: 200, radius: 3, pierceLeft: 1, hitIds: [], isSub: true });
+    update(w, 16);
+    ok('子子弹爆炸：30% 子伤 (20 → 6) 传给邻兵', Math.abs(dmgOf(b) - 6) < 1e-9);
+  }
+  // ⑧ 子子弹不再分裂（防递归）
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    w.enemies.push(stub(351, 225, 300));
+    w.mods.bulletSplit = 1;
+    const before = w.bullets.filter((b) => b.isSub).length;
+    w.bullets.push({ x: 225, y: 300, vx: 0, vy: 0, damage: 20, life: 200, radius: 3, pierceLeft: 1, hitIds: [], isSub: true });
+    update(w, 16);
+    const after = w.bullets.filter((b) => b.isSub).length;
+    ok('子子弹命中不再分裂（防递归）', after <= before && w.pendingBullets.length === 0);
+  }
+  // ⑨ 修饰卡门槛：主卡不在手就不进池（不发废卡）
+  {
+    const w = createWorld(); w.running = true; w.level = 8;
+    let seen = 0;
+    for (let i = 0; i < 300; i++) if (rollCards(w).some((c) => c.id === 'bullet-sub-dmg')) seen++;
+    ok('没拿分裂时，子子弹强化卡不进池', seen === 0);
+    w.mods.bulletSplit = 1;
+    seen = 0;
+    for (let i = 0; i < 300; i++) if (rollCards(w).some((c) => c.id === 'bullet-sub-dmg')) seen++;
+    ok('拿了分裂后，子子弹强化卡才进池', seen > 0);
+  }
 }
 
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);

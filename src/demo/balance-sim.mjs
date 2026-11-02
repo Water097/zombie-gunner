@@ -26,6 +26,11 @@ const RUNS_PER_STRATEGY = (() => {
 const SMART_PRIORITY = [
   'bullet-dmg', 'bullet-dmg',           // 伤害主轴（允许重复优先）
   'bullet-spread', 'bullet-double',     // 弹道卡（06册）：清群核心，正确玩家必拿
+  'bullet-split',                        // 子弹属性卡（06册 §3.2.1）：分裂先立，修饰卡才有意义
+  'bullet-explode',                      // 爆炸弹头：命中点 AOE
+  'bullet-sub-boom', 'bullet-sub-dmg',   // 子子弹修饰（要有分裂才进池，排后面）
+  'bullet-explode-range',
+  'bullet-fire',                         // 火：单体 DoT，最弱的一档常驻
   'learn-freeze',                        // 专精冰系
   'icebreak',                            // 放大器直接跟线
   'freeze-dur', 'freeze-cd',

@@ -291,11 +291,24 @@ function drawStatusIcons(e, x0, y) {
 }
 
 function drawBullets() {
+  // 子弹属性卡的可视化（06 册 §3.2.1）：带火 → 橙红，带爆炸 → 外圈黄环，子子弹 → 小颗偏黄白
+  const fire = world.mods.bulletFire, boom = world.mods.bulletExplode;
   for (const b of world.bullets) {
-    ctx.fillStyle = 'rgba(255,224,138,0.4)';
+    if (b.isSub) {
+      ctx.fillStyle = 'rgba(255,207,92,0.30)';
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#ffe9b0';
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
+      continue;
+    }
+    ctx.fillStyle = fire ? 'rgba(255,110,60,0.38)' : 'rgba(255,224,138,0.4)';
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = '#ffe08a';
+    ctx.fillStyle = fire ? '#ff7a3c' : '#ffe08a';
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
+    if (boom) {
+      ctx.strokeStyle = 'rgba(255,200,80,0.85)'; ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 1.5, 0, Math.PI * 2); ctx.stroke();
+    }
   }
 }
 
@@ -303,16 +316,16 @@ function drawVehicles() {
   for (const v of world.vehicles) {
     if (v.ramp > 0) continue; // 还没进场
     const a = Math.min(1, v.life / 400);
-    // 冲撞范围（半透明军绿光晕，让"碾过一片"看得见）
-    ctx.globalAlpha = 0.10 * a;
-    ctx.fillStyle = v.color;
-    ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.28 * a;
-    ctx.strokeStyle = v.color; ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, Math.PI * 2); ctx.stroke();
-
-    const w = v.heavy ? 52 : 34, h = v.heavy ? 78 : 52;
+    // 判定框 = 车身本身（2026-11-02 用户要求：不再是车身外一圈，所以不画外圈光晕）
+    const w = v.w, h = v.h;
     const x = v.x - w / 2, y = v.y - h / 2;
+    ctx.globalAlpha = 0.14 * a;
+    ctx.fillStyle = v.color;
+    roundRect(x, y, w, h, 6); ctx.fill();
+    // 碾压判定描边（玩家能一眼看出"压到哪算碾"）
+    ctx.globalAlpha = 0.55 * a;
+    ctx.strokeStyle = '#e9c46a'; ctx.lineWidth = 1.2;
+    roundRect(x, y, w, h, 6); ctx.stroke();
     // 尾尘（车后拖一条扬尘）
     ctx.globalAlpha = 0.22 * a;
     ctx.fillStyle = '#c9c2a8';

@@ -99,23 +99,47 @@ export const SKILLS = {
   // 装甲车（02 册 2.3 / 六格 · 物理系 · 击退守线）
   // 形态：从要塞出发沿纵向碾上去的实体载具，路上多段伤害 + 击退 + 减速。
   // 它是唯一能主动把敌人推回警戒线的技能——价值在"推回去"，不在"打死"。
-  // "范围 180"= 冲撞判定直径（半径 90）；伤害间隔 0.1s = 同一目标被反复碾。
+  // 判定几何（2026-11-02 用户粗调）：**只用车身矩形**，不是车身外一圈圆。
+  // 车身尺寸与 main.mjs 画的模型同源（bodyW/bodyH 由这里给出，渲染直接读 v.w/v.h）。
   vehicle: {
     name: '装甲车', key: '4', color: '#6b8f4e',
     cooldownMs: 17400,
     dmg: 17,            // 单段冲撞伤害（02 册基础值）
-    radius: 90,         // 冲撞判定半径（范围 180 的半径）
-    speed: 420,         // 行进速度 px/s
+    speed: 210,         // 行进速度 px/s（420 → 210：用户 2026-11-02 要求"调低一倍"）
+    bodyW: 34,          // 车身宽（= 模型的宽，判定用）
+    bodyH: 52,          // 车身高
+    bodyHeavyW: 52,     // 重型装甲车（⑥ 质变卡）：模型与判定一起放大
+    bodyHeavyH: 78,
     hitIntervalMs: 100, // 多段伤害间隔
     knock: 25,          // 撞击击退距离（守线杠杆，每车每目标只结算一次）
     slowMag: 0.3,       // 减速幅度 30%
     slowMs: 2000,       // 基础减速时长（③ 卡 +4s）
     laneOffset: 62,     // 多车同场时的横向间隔
-    lifeMs: 2600,       // 存在时间上限（防止卡在场上）
+    lifeMs: 5200,       // 存在时间上限（防止卡在场上）；速度减半后等比例延长，保证行进总距离不变（原 420×2.6s ≈ 1092px → 210×5.2s）
   },
 };
 
 let _idSeq = 1;
+
+// ── 子弹属性卡（06 册 §3.2.1）──
+// 边界：只作用于**主武器子弹**，与 9 技能完全独立（技能照常按 02 册运行）。
+// 纪律：① 显著弱于同名技能（这里是"常驻弱版"）② 子子弹不继承主子弹的火/爆炸（防雪球）
+//      ③ 子子弹不再分裂（防递归）④ 修饰卡自身不生效，只在主卡在手时才进池
+// ⚠️ 全部为 06 册校准后的临时基准值，数值阶段复核。
+export const BULLET_TRAITS = {
+  fireDpsRatio: 0.08,   // 火属性弹头：每秒 8% × 子弹伤害
+  fireMs: 2000,         //   持续 2s（总约 16% 子弹伤害，单目标无 AOE）
+  explodeDmgRatio: 0.12,// 爆炸弹头：12% × 子弹伤害
+  explodeR: 35,         //   半径 35px（温压弹 120 的约 30%，硬约束"显著小于技能"）
+  splitMin: 2,          // 命中分裂：2-4 颗（均值 3）
+  splitMax: 4,
+  subDmgRatio: 0.20,    // 子子弹 = 20% 主伤（"子子弹伤害 +30%" 卡把它抬到 26%）
+  subRange: 90,         // 子子弹射程 90px
+  subConeDeg: 30,       // ±30° 锥角
+  subSpeed: 520,        // 子子弹飞行速度 px/s
+  subExplodeDmgRatio: 0.30, // 子子弹爆炸：30% × 子伤（即 6% 主伤）
+  subExplodeR: 25,      //   半径 25px
+};
 
 // ── 加成/武器/技能卡的累计修正（08 册约束3：同桶加算，不连乘）──
 function defaultMods() {
@@ -153,6 +177,13 @@ function defaultMods() {
     vehicleTar: 0,          // 局外 12 级：粘性焦油（追加目标最大生命 3%）
     vehicleFirstBoom: 0,    // 局外 18 级：首次命中后小范围爆炸 200%
     vehicleLevel: 0,        // 局外 20 级：碾过冻结单位 +200%（喂给 14 册硬门禁接口）
+    // ── 子弹属性卡（06 册 §3.2.1）：常驻弱版，与技能独立 ──
+    bulletFire: 0,          // ① 火属性弹头（命中附加灼烧）
+    bulletExplode: 0,       // ② 爆炸弹头（命中小爆炸）
+    bulletExplodeMul: 1,    // ③ 爆炸范围 +100% → ×2（修饰卡）
+    bulletSplit: 0,         // ④⑤ 命中分裂（子子弹 20% 主伤）
+    subDmgMul: 1,           // ⑥ 子子弹伤害 +30%（修饰卡）
+    subExplode: 0,          // ⑦ 子子弹爆炸（修饰卡）
   };
 }
 
@@ -169,6 +200,7 @@ export function createWorld() {
     },
     enemies: [],
     bullets: [],
+    pendingBullets: [], // 本帧新生成的子子弹（分裂卡）：循环后再并入，避免边遍历边追加
     skillShots: [],
     strikes: [],  // 电磁天雷的视觉残留（闪电柱 + 落点电圈，纯表现层，伤害在施放时瞬时结算）
     arcs: [],     // 弹射电弧的视觉残留（落点 → 附近敌人的短折线）
@@ -562,21 +594,24 @@ function castVehicle(world) {
   const count = 1 + Math.round(m.vehicleCount);
   const baseX = world.player.x;
   const half = (count - 1) / 2;
+  const heavy = !!m.vehicleHeavy;
+  const w = heavy ? sk.bodyHeavyW : sk.bodyW;
+  const h = heavy ? sk.bodyHeavyH : sk.bodyH;
   for (let i = 0; i < count; i++) {
-    const r = sk.radius * (m.vehicleHeavy ? 1.8 : 1);
-    // 多车时横向铺开但不出屏（半辆车身也算出屏，按半径夹住）
-    const x = Math.max(r * 0.5, Math.min(WORLD.W - r * 0.5, baseX + (i - half) * sk.laneOffset));
+    // 多车时横向铺开但不出屏（半辆车身也算出屏，按半宽夹住）
+    const x = Math.max(w * 0.5, Math.min(WORLD.W - w * 0.5, baseX + (i - half) * sk.laneOffset));
     world.vehicles.push({
       x,
       y: world.player.y + 30,
-      r,
+      w,
+      h,
       vy: -sk.speed,
       life: sk.lifeMs,
       ramp: i * 200,       // 依次出场，避免多车挤成一堵墙
       hitCd: new Map(),    // enemyId → 剩余冷却（多段伤害节流）
       knocked: new Set(),  // 已被这辆车推过的目标（击退每车每目标只结算一次）
       firstHit: false,     // 局外 18 级「冲撞爆破」每车只炸一次
-      heavy: !!m.vehicleHeavy,
+      heavy,
       color: sk.color,
     });
   }
@@ -628,6 +663,68 @@ function vehicleBoom(world, x, y, r, dmg) {
   for (let i = 0; i < 12; i++) {
     const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 140;
     addParticle(world, x, y, Math.cos(a) * sp, Math.sin(a) * sp, 320, color, 3);
+  }
+}
+
+// ── 子弹属性卡结算（06 册 §3.2.1）──
+// 主子弹命中：火（给目标挂灼烧）→ 爆炸（命中点小爆炸）→ 分裂（命中点炸出子子弹）
+// 子子弹命中：只可能触发「子子弹爆炸」——不再分裂、不继承火/爆炸（防递归/雪球）
+const META_BULLET_FIRE = { sourceId: 'bullet-fire', sourceLevel: 1, displaceType: 'normal' };
+
+function bulletOnHit(world, b, e, hx, hy) {
+  const m = world.mods, T = BULLET_TRAITS;
+  if (b.isSub) {
+    if (m.subExplode) {
+      blast(world, hx, hy, b.damage * T.subExplodeDmgRatio, T.subExplodeR * m.bulletExplodeMul, '#ffcf5c');
+    }
+    return;
+  }
+  // ① 火属性弹头：单目标 DoT，伤害按这颗子弹实际伤害折算（吃子弹伤害加成）
+  if (m.bulletFire && e.alive) {
+    apply(e.st, 'burn', b.damage * T.fireDpsRatio, T.fireMs, META_BULLET_FIRE);
+  }
+  // ② 爆炸弹头：命中点小爆炸（③ 爆炸范围卡把半径 ×2）
+  if (m.bulletExplode) {
+    blast(world, hx, hy, b.damage * T.explodeDmgRatio, T.explodeR * m.bulletExplodeMul, '#ffb347');
+  }
+  // ④⑤ 命中分裂：2-4 颗子子弹，±30° 锥角飞出
+  if (m.bulletSplit) spawnSubBullets(world, b, hx, hy);
+}
+
+// 通用小范围伤害（不吃子弹属性卡，防递归）
+function blast(world, x, y, dmg, r, color) {
+  addRing(world, x, y, r, color);
+  for (const e of world.enemies) {
+    if (!e.alive) continue;
+    const rr = r + e.radius;
+    if (dist2(x, y, e.x, e.y) <= rr * rr) dealDamage(world, e, dmg, 'weapon');
+  }
+  for (let i = 0; i < 6; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 50 + Math.random() * 90;
+    addParticle(world, x, y, Math.cos(a) * sp, Math.sin(a) * sp, 260, color, 2);
+  }
+}
+
+function spawnSubBullets(world, b, x, y) {
+  const m = world.mods, T = BULLET_TRAITS;
+  const n = T.splitMin + Math.floor(Math.random() * (T.splitMax - T.splitMin + 1));
+  const base = Math.atan2(b.vy, b.vx);
+  const cone = (T.subConeDeg * Math.PI) / 180;
+  const dmg = b.damage * T.subDmgRatio * m.subDmgMul;
+  for (let i = 0; i < n; i++) {
+    const ang = base + (Math.random() * 2 - 1) * cone;
+    // 进 pending 队列而不是直接 push：正在 for..of 遍历 world.bullets，直接 push 会让新子弹同帧被处理
+    world.pendingBullets.push({
+      x, y,
+      vx: Math.cos(ang) * T.subSpeed,
+      vy: Math.sin(ang) * T.subSpeed,
+      damage: dmg,
+      life: (T.subRange / T.subSpeed) * 1000,  // 90px 射程 → 约 173ms
+      radius: 3,
+      pierceLeft: 1,
+      hitIds: [],
+      isSub: true,
+    });
   }
 }
 
@@ -788,8 +885,12 @@ export function update(world, dtMs) {
     for (const e of world.enemies) {
       if (!e.alive) continue;
       if (v.hitCd.has(e.id)) continue;
-      const rr = v.r + e.radius;
-      if (dist2(v.x, v.y, e.x, e.y) <= rr * rr) {
+      // 判定 = 车身矩形（按敌人半径外扩，近似圆-矩形碰撞）。
+      // 2026-11-02 用户粗调：原来是"车身外半径 90 的圆"，怪物站在车旁边一截也算被碾，
+      // 观感上"周围一圈都在掉血"；现在只有真正被车身压到的才受伤。
+      const hw = v.w / 2 + e.radius;
+      const hh = v.h / 2 + e.radius;
+      if (Math.abs(e.x - v.x) <= hw && Math.abs(e.y - v.y) <= hh) {
         vehicleHit(world, v, e);
         v.hitCd.set(e.id, SKILLS.vehicle.hitIntervalMs);
       }
@@ -808,9 +909,11 @@ export function update(world, dtMs) {
       if (b.hitIds.includes(e.id)) continue;
       const rr = (e.radius + b.radius);
       if (dist2(b.x, b.y, e.x, e.y) <= rr * rr) {
+        const hx = b.x, hy = b.y;   // 命中点：爆炸/分裂发生在接触点，不是敌人中心
         dealDamage(world, e, b.damage, 'weapon');
         b.hitIds.push(e.id);
         b.pierceLeft -= 1;
+        bulletOnHit(world, b, e, hx, hy);
         for (let i = 0; i < 4; i++) {
           const a = Math.random() * Math.PI * 2, sp = 40 + Math.random() * 80;
           addParticle(world, b.x, b.y, Math.cos(a) * sp, Math.sin(a) * sp, 220, '#ffd36e', 2);
@@ -819,6 +922,11 @@ export function update(world, dtMs) {
         // 仍有穿透次数：继续飞，不 break
       }
     }
+  }
+  // 分裂出的子子弹下一帧开始飞（本帧不参与碰撞，避免"刚分裂就命中"）
+  if (world.pendingBullets.length > 0) {
+    world.bullets.push(...world.pendingBullets);
+    world.pendingBullets.length = 0;
   }
 
   // ── 技能弹推进 + 命中（弹道飞向敌人，命中/爆炸才施加状态）──
