@@ -137,6 +137,7 @@ function render() {
   drawRings();
   drawStrikes();
   drawArcs();
+  drawVehicles();
   drawEnemies();
   drawSkillShots();
   drawBullets();
@@ -296,6 +297,53 @@ function drawBullets() {
     ctx.fillStyle = '#ffe08a';
     ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
   }
+}
+
+function drawVehicles() {
+  for (const v of world.vehicles) {
+    if (v.ramp > 0) continue; // 还没进场
+    const a = Math.min(1, v.life / 400);
+    // 冲撞范围（半透明军绿光晕，让"碾过一片"看得见）
+    ctx.globalAlpha = 0.10 * a;
+    ctx.fillStyle = v.color;
+    ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.28 * a;
+    ctx.strokeStyle = v.color; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(v.x, v.y, v.r, 0, Math.PI * 2); ctx.stroke();
+
+    const w = v.heavy ? 52 : 34, h = v.heavy ? 78 : 52;
+    const x = v.x - w / 2, y = v.y - h / 2;
+    // 尾尘（车后拖一条扬尘）
+    ctx.globalAlpha = 0.22 * a;
+    ctx.fillStyle = '#c9c2a8';
+    ctx.beginPath(); ctx.ellipse(v.x, v.y + h * 0.55, w * 0.45, h * 0.28, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = a;
+    // 履带（左右两条深色带 + 分段）
+    ctx.fillStyle = '#2f3a28';
+    ctx.fillRect(x - 3, y + 4, 5, h - 8);
+    ctx.fillRect(x + w - 2, y + 4, 5, h - 8);
+    ctx.fillStyle = '#4a5a3c';
+    for (let i = 0; i < 5; i++) {
+      const ty = y + 6 + i * ((h - 12) / 5);
+      ctx.fillRect(x - 3, ty, 5, 3);
+      ctx.fillRect(x + w - 2, ty, 5, 3);
+    }
+    // 车体
+    ctx.fillStyle = v.color;
+    roundRect(x, y, w, h, 6); ctx.fill();
+    // 车体高光/阴影，做出立体感
+    ctx.fillStyle = 'rgba(255,255,255,0.14)';
+    roundRect(x + 3, y + 3, w - 6, h * 0.32, 4); ctx.fill();
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    roundRect(x + 3, y + h * 0.66, w - 6, h * 0.3, 4); ctx.fill();
+    // 炮管（朝上，指向行进方向）
+    ctx.fillStyle = '#3d4a33';
+    ctx.fillRect(v.x - 3, y - 12, 6, 14);
+    // 车头撞角（亮黄警示条）
+    ctx.fillStyle = '#e9c46a';
+    ctx.fillRect(x + 2, y + 1, w - 4, 3);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawSkillShots() {

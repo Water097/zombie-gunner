@@ -510,5 +510,147 @@ console.log('— 电磁质变：15 级弹射电弧 / 20 级雷暴 —');
   ok('弹道卡满 3 层后不再进池（不发废卡）', after === 0);
 }
 
+console.log('— 装甲车：出场 / 多段冲撞 / 击退 / 减速 —');
+{
+  // 隔离主武器：弹匣清空并设为长换弹，避免子弹伤害污染载具数值
+  const stopFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'vehicle');
+  stopFire(w);
+  const e = makeEnemyEntity('zombie', 225, 500);
+  e.id = 201; e.hp = 9999; e.maxHp = 9999;
+  w.enemies.push(e);
+
+  ok('施放成功', castSkill(w, 'vehicle') === true);
+  ok('生成 1 辆载具', w.vehicles.length === 1);
+  ok('施放后进入冷却', w.skills.vehicle.cd > 0);
+
+  const drops = [];
+  let last = e.hp;
+  const yStart = e.y;
+  for (let i = 0; i < 130; i++) { // ≈2.1s：够车从要塞碾过 y=500
+    update(w, 16);
+    if (e.hp < last) { drops.push(Math.round((last - e.hp) * 100) / 100); last = e.hp; }
+  }
+  ok('造成多段伤害（≥3 段）', drops.length >= 3);
+  ok('单段伤害 = 基础 17（无卡）', drops[0] === 17);
+  ok('敌人被推回（y 减小）', e.y < yStart);
+  ok('敌人进入减速', has(e.st, 'slow'));
+  ok('载具最终离场', w.vehicles.length === 0);
+}
+
+console.log('— 装甲车：② 冲撞次数 +2 —');
+{
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'vehicle');
+  w.mods.vehicleCount = 2;
+  castSkill(w, 'vehicle');
+  ok('一次施放出场 3 辆', w.vehicles.length === 3);
+}
+
+console.log('— 装甲车：20 级「冰冻碾碎」碾过冻结单位 ×3 —');
+{
+  const stopFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
+  const run = (withCard) => {
+    const w = createWorld(); w.running = true;
+    learnSkill(w, 'vehicle'); stopFire(w);
+    if (withCard) w.mods.vehicleLevel = 20;
+    const e = makeEnemyEntity('zombie', 225, 500);
+    e.id = 301; e.hp = 9999; e.maxHp = 9999;
+    apply(e.st, 'freeze', 1, 99999, { sourceId: 'test', sourceLevel: 1, displaceType: 'normal' });
+    w.enemies.push(e);
+    castSkill(w, 'vehicle');
+    let first = null, last = e.hp;
+    for (let i = 0; i < 130 && first === null; i++) {
+      update(w, 16);
+      if (e.hp < last) { first = Math.round((last - e.hp) * 100) / 100; last = e.hp; }
+    }
+    return first;
+  };
+  ok('无卡：冻结目标仍是 17', run(false) === 17);
+  ok('有卡：冻结目标 17×3 = 51', run(true) === 51);
+}
+
+console.log('— 装甲车：④ 易伤 / ⑤ 眩晕 —');
+{
+  const stopFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
+  // ④ 易伤：撞过之后后续伤害 +20%（不可叠加）
+  {
+    const w = createWorld(); w.running = true;
+    learnSkill(w, 'vehicle'); stopFire(w);
+    w.mods.vehicleVuln = 1;
+    const e = makeEnemyEntity('zombie', 225, 500);
+    e.id = 401; e.hp = 9999; e.maxHp = 9999;
+    w.enemies.push(e);
+    castSkill(w, 'vehicle');
+    const drops = [];
+    let last = e.hp;
+    for (let i = 0; i < 130; i++) {
+      update(w, 16);
+      if (e.hp < last) { drops.push(Math.round((last - e.hp) * 100) / 100); last = e.hp; }
+    }
+    ok('撞击后目标进入易伤', has(e.st, 'vuln'));
+    ok('第 2 段起吃 1.2 倍（20.4）', drops[1] === 20.4);
+  }
+  // ⑤ 眩晕：概率卡生效时目标进入眩晕
+  {
+    const w = createWorld(); w.running = true;
+    learnSkill(w, 'vehicle'); stopFire(w);
+    w.mods.vehicleStunChance = 0.1;
+    const e = makeEnemyEntity('zombie', 225, 500);
+    e.id = 402; e.hp = 9999; e.maxHp = 9999;
+    w.enemies.push(e);
+    castSkill(w, 'vehicle');
+    const orig = Math.random;
+    Math.random = () => 0; // 强制命中眩晕判定
+    try { for (let i = 0; i < 60; i++) update(w, 16); } finally { Math.random = orig; }
+    ok('眩晕判定命中 → 目标眩晕', has(e.st, 'stun'));
+  }
+}
+
+console.log('— 装甲车：六格卡的 mods 生效 —');
+{
+  const m = () => createWorld().mods;
+  const card = (id) => CARDS.find((c) => c.id === id);
+  {
+    const x = m(); card('vehicle-dmg').apply(x);
+    ok('① 冲撞伤害 +60%', x.vehicleDmgMul === 1.6);
+  }
+  {
+    const x = m(); card('vehicle-count').apply(x);
+    ok('② 冲撞次数 +2', x.vehicleCount === 2);
+  }
+  {
+    const x = m(); card('vehicle-slow').apply(x);
+    ok('③ 减速持续 +4s', x.vehicleSlowBonus === 4000);
+  }
+  {
+    const x = m(); card('vehicle-vuln').apply(x);
+    ok('④ 撞击易伤开', x.vehicleVuln === 1);
+  }
+  {
+    const x = m(); card('vehicle-knock').apply(x);
+    ok('⑤ 击退 +75% 且眩晕 10%', x.vehicleKnockMul === 0.75 && x.vehicleStunChance === 0.1);
+  }
+  {
+    const x = m(); card('vehicle-heavy').apply(x);
+    ok('⑥ 重型装甲车', x.vehicleHeavy === 1);
+  }
+}
+
+console.log('— 装甲车：学习卡进池 —');
+{
+  const w = createWorld(); w.running = true;
+  let seen = 0;
+  for (let i = 0; i < 200; i++) {
+    w.level = 1; w.lastCardLevel = 1; w.pendingCards = [];
+    const picks = rollCards(w);
+    if (picks.some((c) => c.id === 'learn-vehicle')) seen++;
+  }
+  ok('开局三选一能抽到【装甲车】学习卡', seen > 0);
+  const learn = LEARN_CARDS.find((c) => c.target === 'vehicle');
+  ok('学习卡文案带主语与形态', /装甲车/.test(learn.text) && /击退|碾/.test(learn.text));
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);

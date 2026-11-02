@@ -48,6 +48,7 @@ export const LEARN_CARDS = [
   { id: 'learn-freeze', kind: 'learn', target: 'freeze', name: '干冰弹', text: '学会【干冰弹】· 冰系穿透，冻结敌人' },
   { id: 'learn-burn', kind: 'learn', target: 'burn', name: '温压弹', text: '学会【温压弹】· 火系爆炸，灼烧敌人' },
   { id: 'learn-shock', kind: 'learn', target: 'shock', name: '电磁天雷', text: '学会【电磁天雷】· 随机降下闪电，范围感电' },
+  { id: 'learn-vehicle', kind: 'learn', target: 'vehicle', name: '装甲车', text: '学会【装甲车】· 物理碾压，击退推回警戒线' },
 ];
 
 export const CARDS = [
@@ -90,6 +91,30 @@ export const CARDS = [
     apply: (m) => { m.shockArc = 1; } },
   { id: 'shock-storm', kind: 'skill', target: 'shock', name: '雷暴', once: true, text: '【电磁】落点形成雷雨区，2 秒内持续落小闪电',
     apply: (m) => { m.shockStorm = 1; } },
+
+  // ── 装甲车卡（02 册 3.2 六格 + 12/15/18/20 局外节点）──
+  // 正确投法：②冲撞次数是核心，①伤害几乎不点——靠位移不靠打。
+  { id: 'vehicle-dmg', kind: 'skill', target: 'vehicle', name: '冲压装药', text: '【装甲车】冲撞伤害 +60%',
+    apply: (m) => { m.vehicleDmgMul += 0.6; } },
+  { id: 'vehicle-count', kind: 'skill', target: 'vehicle', name: '连续出击', text: '【装甲车】冲撞次数 +2', maxStacks: 2,
+    apply: (m) => { m.vehicleCount += 2; } },
+  { id: 'vehicle-slow', kind: 'skill', target: 'vehicle', name: '粘性履带', text: '【装甲车】减速持续 +4 秒',
+    apply: (m) => { m.vehicleSlowBonus += 4000; } },
+  { id: 'vehicle-vuln', kind: 'skill', target: 'vehicle', name: '破甲撞角', text: '【装甲车】撞击目标 6 秒内受伤 +20%',
+    apply: (m) => { m.vehicleVuln = 1; } },
+  { id: 'vehicle-knock', kind: 'skill', target: 'vehicle', name: '冲压装甲', text: '【装甲车】击退 +75%，10% 概率眩晕 1 秒',
+    apply: (m) => { m.vehicleKnockMul += 0.75; m.vehicleStunChance += 0.1; } },
+  { id: 'vehicle-heavy', kind: 'skill', target: 'vehicle', name: '重型装甲车', once: true, text: '【装甲车】冲撞范围 +80%，伤害 +50%',
+    apply: (m) => { m.vehicleHeavy = 1; } },
+  // 局外节点卡（对应 12 / 15 / 18 / 20 级，02 册 2.3）：一次性，拿过不再进池
+  { id: 'vehicle-tar', kind: 'skill', target: 'vehicle', name: '粘性焦油', once: true, text: '【装甲车】撞击追加目标最大生命 3% 伤害',
+    apply: (m) => { m.vehicleTar = 1; } },
+  { id: 'vehicle-stun5', kind: 'skill', target: 'vehicle', name: '碾压眩晕', once: true, text: '【装甲车】5% 概率眩晕 2 秒',
+    apply: (m) => { m.vehicleStun5 = 1; } },
+  { id: 'vehicle-firstboom', kind: 'skill', target: 'vehicle', name: '冲撞爆破', once: true, text: '【装甲车】命中首个目标后小范围爆炸（200% 伤害）',
+    apply: (m) => { m.vehicleFirstBoom = 1; } },
+  { id: 'vehicle-frozen', kind: 'skill', target: 'vehicle', name: '冰冻碾碎', once: true, text: '【装甲车】碾过【冻结】单位伤害 +200%',
+    apply: (m) => { m.vehicleLevel = 20; } },
 
   // ── 加成卡 A 类：放大器（要求对应技能已学，否则是废卡）──
   // 强度纪律：条件卡 ≈ 同类无条件卡的 1.5~2 倍（补偿覆盖率；条件越苛刻倍率越高）
@@ -183,7 +208,8 @@ export function rollCards(world) {
 
   const learnedCount = Object.keys(world.skills).length;
   const remaining = MAX_LEVEL - world.level;
-  const canLearn = learnedCount < 3 && remaining >= 4;
+  // 停发新技能卡：技能学满（LEARN_CARDS 数量）或剩余选择不足 4 次时不再发
+  const canLearn = learnedCount < LEARN_CARDS.length && remaining >= 4;
 
   // 方向计数（硬保底用）：本次三选一里每个方向已占几张
   const catCount = (c) => picks.filter((p) => categoryOf(p) === categoryOf(c)).length;

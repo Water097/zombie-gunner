@@ -11,7 +11,14 @@ import { createWorld, update, chooseCard, RUN, bulletsPerShot, pelletFactor } fr
 import { MAX_LEVEL } from './cards.mjs';
 
 const STEP = 16;
-const RUNS_PER_STRATEGY = 12;
+// 每策略局数：默认 12（冒烟够用）；做正式校准必须放大样本——
+// 24 局时通关率的二项标准差就有 ±2.2 局，单次结果无法区分 60% 与 80%。
+// 用法：node src/demo/balance-sim.mjs --runs=100
+const RUNS_PER_STRATEGY = (() => {
+  const arg = process.argv.find((a) => a.startsWith('--runs='));
+  const n = arg ? Number(arg.split('=')[1]) : 12;
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : 12;
+})();
 
 // ── 选卡策略 ──
 // smart：专精流——武器伤害为主轴，专注冰系一条线（干冰弹→极寒延长→制冷回路→破冰），

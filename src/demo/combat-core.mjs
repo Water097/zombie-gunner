@@ -96,6 +96,23 @@ export const SKILLS = {
     stormDmgRatio: 0.35, // 每道小闪电伤害比例
     stormStrikeRRatio: 0.6, // 小闪电自身落点半径 = strikeR × 此值
   },
+  // 装甲车（02 册 2.3 / 六格 · 物理系 · 击退守线）
+  // 形态：从要塞出发沿纵向碾上去的实体载具，路上多段伤害 + 击退 + 减速。
+  // 它是唯一能主动把敌人推回警戒线的技能——价值在"推回去"，不在"打死"。
+  // "范围 180"= 冲撞判定直径（半径 90）；伤害间隔 0.1s = 同一目标被反复碾。
+  vehicle: {
+    name: '装甲车', key: '4', color: '#6b8f4e',
+    cooldownMs: 17400,
+    dmg: 17,            // 单段冲撞伤害（02 册基础值）
+    radius: 90,         // 冲撞判定半径（范围 180 的半径）
+    speed: 420,         // 行进速度 px/s
+    hitIntervalMs: 100, // 多段伤害间隔
+    knock: 25,          // 撞击击退距离（守线杠杆，每车每目标只结算一次）
+    slowMag: 0.3,       // 减速幅度 30%
+    slowMs: 2000,       // 基础减速时长（③ 卡 +4s）
+    laneOffset: 62,     // 多车同场时的横向间隔
+    lifeMs: 2600,       // 存在时间上限（防止卡在场上）
+  },
 };
 
 let _idSeq = 1;
@@ -123,7 +140,19 @@ function defaultMods() {
     dmgVsBurn: 1,         // 助燃：对燃烧目标
     dmgVsShock: 1,        // 导电体：对感电目标
     xpRate: 1,            // 快速学习
-    skillCdMul: { freeze: 1, burn: 1, shock: 1 },
+    skillCdMul: { freeze: 1, burn: 1, shock: 1, vehicle: 1 },
+    // ── 装甲车（02 册六格 + 12/15/18/20 节点）──
+    vehicleDmgMul: 1,       // ① 冲撞伤害倍率
+    vehicleCount: 0,        // ② 冲撞次数（每次施放出场车辆数）
+    vehicleSlowBonus: 0,    // ③ 减速持续加值 ms
+    vehicleVuln: 0,         // ④ 撞击目标易伤（0/1）
+    vehicleKnockMul: 0,     // ⑤ 击退距离倍率加值
+    vehicleStunChance: 0,   // ⑤ 眩晕概率（+10%/张）
+    vehicleStun5: 0,        // 局外 15 级：额外 5% 眩晕 2s
+    vehicleHeavy: 0,        // ⑥ 重型装甲车（质变）
+    vehicleTar: 0,          // 局外 12 级：粘性焦油（追加目标最大生命 3%）
+    vehicleFirstBoom: 0,    // 局外 18 级：首次命中后小范围爆炸 200%
+    vehicleLevel: 0,        // 局外 20 级：碾过冻结单位 +200%（喂给 14 册硬门禁接口）
   };
 }
 
@@ -144,6 +173,7 @@ export function createWorld() {
     strikes: [],  // 电磁天雷的视觉残留（闪电柱 + 落点电圈，纯表现层，伤害在施放时瞬时结算）
     arcs: [],     // 弹射电弧的视觉残留（落点 → 附近敌人的短折线）
     storms: [],   // 雷雨区（20 级雷暴）：{x,y,r,life,tick}，update 里持续落小闪电
+    vehicles: [], // 装甲车实体：{x,y,r,vy,life,hitCd(每人冷却),firstHit,ramp}
     particles: [],
     floaters: [],
     rings: [],
@@ -159,7 +189,7 @@ export function createWorld() {
     pendingCards: [],
     cardPhase: false,
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
-    slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
+    slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0, vehicle: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
     bonusTaken: 0,       // 已拿加成卡数（08 册软上限：按等级分层解锁）
     petFlash: 0,         // 宠物机器人释放技能时的闪光
     mercyArmed: false,   // 要塞血量首次跌破 50% → 下一抽出现「要塞急救」
@@ -250,7 +280,7 @@ function dealDamage(world, enemy, raw, source = 'weapon') {
   enemy.hitFlash = 90;
   if (gate > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×3  ${Math.round(dmg)}`, '#ff4d4d');
   else if (cond.tag) addFloater(world, enemy.x, enemy.y - enemy.radius, `${cond.tag} ${Math.round(dmg)}`, cond.color);
-  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : '#ffffff');
+  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : source === 'vehicle' ? '#a8d08d' : '#ffffff');
   if (enemy.hp <= 0) killEnemy(world, enemy);
 }
 
@@ -269,6 +299,13 @@ function conditionMultiplier(world, enemy) {
       d *= a.get(m);
       if (!tag) { tag = a.tag; color = a.color; }
     }
+  }
+  // 易伤（14 册 amplify 类，不可叠加）：装甲车 ④「撞击目标 6s 内受伤 +20%」等
+  // 与放大器同乘一个伤害桶——它奖励的不是配合，是"被这辆车撞过"
+  const vuln = read(st, 'vuln');
+  if (vuln > 0) {
+    d *= 1 + vuln;
+    if (!tag) { tag = '易伤'; color = '#ffb3d9'; }
   }
   // ❌ 交叉火力已删除（2026-11-02）：常驻条件增伤超模
   return { mult: d, tag, color };
@@ -507,6 +544,86 @@ function addArc(world, x1, y1, x2, y2, color) {
   world.arcs.push({ pts, color, life: 220, maxLife: 220 });
 }
 
+// ── 装甲车（02 册：物理系 · 击退守线）──
+// 从要塞出发、沿纵向碾上去的实体载具：对路上每个敌人每 100ms 结算一段伤害 + 击退 + 减速。
+// 它不是输出技能——价值在"把越线的敌人推回警戒线"（04 册中线纪律），
+// 所以 ②冲撞次数 是核心、①伤害几乎不点（见 02 册 3.2 正确投法）。
+const META_VEHICLE = { sourceId: 'skill-vehicle', sourceLevel: 1, displaceType: 'normal' };
+
+function castVehicle(world) {
+  const m = world.mods, sk = SKILLS.vehicle;
+  const count = 1 + Math.round(m.vehicleCount);
+  const baseX = world.player.x;
+  const half = (count - 1) / 2;
+  for (let i = 0; i < count; i++) {
+    const r = sk.radius * (m.vehicleHeavy ? 1.8 : 1);
+    // 多车时横向铺开但不出屏（半辆车身也算出屏，按半径夹住）
+    const x = Math.max(r * 0.5, Math.min(WORLD.W - r * 0.5, baseX + (i - half) * sk.laneOffset));
+    world.vehicles.push({
+      x,
+      y: world.player.y + 30,
+      r,
+      vy: -sk.speed,
+      life: sk.lifeMs,
+      ramp: i * 200,       // 依次出场，避免多车挤成一堵墙
+      hitCd: new Map(),    // enemyId → 剩余冷却（多段伤害节流）
+      knocked: new Set(),  // 已被这辆车推过的目标（击退每车每目标只结算一次）
+      firstHit: false,     // 局外 18 级「冲撞爆破」每车只炸一次
+      heavy: !!m.vehicleHeavy,
+      color: sk.color,
+    });
+  }
+  return true;
+}
+
+// 单段冲撞：伤害 → 击退 → 减速 → 易伤 → 眩晕 → 首撞爆破
+function vehicleHit(world, v, e) {
+  const m = world.mods, sk = SKILLS.vehicle;
+  let dmg = sk.dmg * m.vehicleDmgMul * (v.heavy ? 1.5 : 1);
+  // 局外 20 级：碾过【冻结】单位 +200%——复用 14 册硬门禁接口，
+  // 只读 has('freeze')，不关心冰冻是谁挂的（跨技能联动成立的技术原因，见 02 册 6.2）
+  dmg *= vehicleRammedMultiplier(e.st, m.vehicleLevel);
+  dealDamage(world, e, dmg, 'vehicle');
+  // 局外 12 级「粘性焦油」：追加目标最大生命 3%
+  if (m.vehicleTar && e.alive) dealDamage(world, e, e.maxHp * 0.03, 'vehicle');
+  if (!e.alive) return;
+  // 击退（守线核心）：推离要塞方向 = y 减小。
+  // 只在【每辆车对该目标的第一次撞击】时推一次——多段伤害不是多次撞飞，
+  // 否则同一只怪在车下被 100ms 推一段，等于永久驱逐，压迫感直接归零（2026-11-02 校准）。
+  if (!v.knocked.has(e.id)) {
+    v.knocked.add(e.id);
+    apply(e.st, 'knock', sk.knock * (1 + m.vehicleKnockMul), 0, META_VEHICLE);
+  }
+  // 减速：粘在履带下
+  apply(e.st, 'slow', sk.slowMag, sk.slowMs + m.vehicleSlowBonus, META_VEHICLE);
+  // ④ 撞击目标 6s 内受伤 +20%（vuln 不可叠加，由状态系统保证）
+  if (m.vehicleVuln) apply(e.st, 'vuln', 0.2, 6000, META_VEHICLE);
+  // ⑤ 10%/张 + 局外 15 级 5%：眩晕
+  const stunP = m.vehicleStunChance + (m.vehicleStun5 ? 0.05 : 0);
+  if (stunP > 0 && Math.random() < stunP) {
+    apply(e.st, 'stun', 1, m.vehicleStun5 ? 2000 : 1000, META_VEHICLE);
+  }
+  // 局外 18 级「冲撞爆破」：每辆车命中首个目标后小范围爆炸（200% 伤害）
+  if (m.vehicleFirstBoom && !v.firstHit) {
+    v.firstHit = true;
+    vehicleBoom(world, e.x, e.y, 70, dmg * 2);
+  }
+}
+
+function vehicleBoom(world, x, y, r, dmg) {
+  const color = SKILLS.vehicle.color;
+  addRing(world, x, y, r, color);
+  for (const e of world.enemies) {
+    if (!e.alive) continue;
+    const rr = r + e.radius;
+    if (dist2(x, y, e.x, e.y) <= rr * rr) dealDamage(world, e, dmg, 'vehicle');
+  }
+  for (let i = 0; i < 12; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 140;
+    addParticle(world, x, y, Math.cos(a) * sp, Math.sin(a) * sp, 320, color, 3);
+  }
+}
+
 export function castSkill(world, id) {
   if (world.gameOver) return false;
   const sk = SKILLS[id];
@@ -519,6 +636,14 @@ export function castSkill(world, id) {
   if (id === 'shock') {
     if (!castSkyStrike(world)) return false; // 场上没有敌人：不消耗冷却
     world.petFlash = 320; // 机器人出手闪光
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+
+  // 装甲车：不走弹道，出场即实体载具——从要塞碾上去，路上多段冲撞
+  if (id === 'vehicle') {
+    castVehicle(world);
+    world.petFlash = 320;
     slot.cd = sk.cooldownMs * m.skillCdMul[id];
     return true;
   }
@@ -644,6 +769,27 @@ export function update(world, dtMs) {
     }
   }
 
+  // ── 装甲车推进 + 多段冲撞（同一目标每 100ms 才再吃一段）──
+  for (const v of world.vehicles) {
+    v.life -= dtMs;
+    if (v.ramp > 0) { v.ramp -= dtMs; continue; } // 出场延迟中：还没进场
+    v.y += v.vy * (dtMs / 1000);
+    for (const [eid, cd] of v.hitCd) {
+      const n = cd - dtMs;
+      if (n <= 0) v.hitCd.delete(eid); else v.hitCd.set(eid, n);
+    }
+    for (const e of world.enemies) {
+      if (!e.alive) continue;
+      if (v.hitCd.has(e.id)) continue;
+      const rr = v.r + e.radius;
+      if (dist2(v.x, v.y, e.x, e.y) <= rr * rr) {
+        vehicleHit(world, v, e);
+        v.hitCd.set(e.id, SKILLS.vehicle.hitIntervalMs);
+      }
+    }
+    if (v.y < -60 || v.life <= 0) v.dead = true;
+  }
+
   // ── 子弹推进 + 碰撞（穿透：命中后 pierceLeft-1，为 0 才消失）──
   for (const b of world.bullets) {
     b.x += b.vx * (dtMs / 1000);
@@ -730,6 +876,7 @@ export function update(world, dtMs) {
   world.strikes = world.strikes.filter((s) => s.life > 0);
   world.arcs = world.arcs.filter((a) => a.life > 0);
   world.storms = world.storms.filter((s) => s.life > 0);
+  world.vehicles = world.vehicles.filter((v) => !v.dead);
   world.particles = world.particles.filter((p2) => p2.life > 0);
   world.floaters = world.floaters.filter((f) => f.life > 0);
   world.rings = world.rings.filter((r) => r.life > 0);
