@@ -81,11 +81,20 @@ export const SKILLS = {
       apply(e.st, 'knock', m.burnKnock, 0, { sourceId: 'skill-burn', sourceLevel: 1, displaceType: 'normal' }); // 普通位移，装甲不免疫
     },
   },
-  // ⚠️ 临时基准值：strikeR/strikeDmg 待数值阶段统一校准
+  // ⚠️ 临时基准值：全部 strike*/arc*/storm* 待数值阶段统一校准
+  // 局外 12 / 15 / 20 级节点在 Demo 里用「引雷针 / 弹射电弧 / 雷暴」三张卡代表（02 册 2.3）
   shock: {
     name: '电磁', key: '3', color: '#ffe14d', cooldownMs: 10000,
     strikeR: 70,    // 感电打击半径（闪电落点的伤害/感电范围）
     strikeDmg: 55,  // 单次闪电伤害（55 → 45 又回 55：经验供给由出怪节奏决定、与技能伤害基本无关，45 是对模拟噪声的过度修正）
+    arcCount: 2,      // 15 级「弹射电弧」：落点向几个敌人弹射
+    arcRange: 130,    // 弹射射程（从落点算）
+    arcRatio: 0.4,    // 弹射伤害比例
+    stormR: 140,      // 20 级「雷暴」：雷雨区半径
+    stormMs: 2000,    // 雷雨区持续
+    stormTickMs: 400, // 区内落雷间隔（3000/400 ≈ 5 道）
+    stormDmgRatio: 0.35, // 每道小闪电伤害比例
+    stormStrikeRRatio: 0.6, // 小闪电自身落点半径 = strikeR × 此值
   },
 };
 
@@ -108,6 +117,8 @@ function defaultMods() {
     shockDmgMul: 1,       // 闪电伤害倍率（高压雷球）
     shockRadiusMul: 1,    // 感电打击半径倍率（电场扩张）
     shockCount: 0,        // 额外闪电数量（引雷针）
+    shockArc: 0,          // 弹射电弧（落点向附近敌人弹射，0/1 一次性卡）
+    shockStorm: 0,        // 雷暴（落点形成雷雨区，0/1 一次性卡）
     dmgVsFrozen: 1,       // 破冰：对冻结目标
     dmgVsBurn: 1,         // 助燃：对燃烧目标
     dmgVsShock: 1,        // 导电体：对感电目标
@@ -131,6 +142,8 @@ export function createWorld() {
     bullets: [],
     skillShots: [],
     strikes: [],  // 电磁天雷的视觉残留（闪电柱 + 落点电圈，纯表现层，伤害在施放时瞬时结算）
+    arcs: [],     // 弹射电弧的视觉残留（落点 → 附近敌人的短折线）
+    storms: [],   // 雷雨区（20 级雷暴）：{x,y,r,life,tick}，update 里持续落小闪电
     particles: [],
     floaters: [],
     rings: [],
@@ -426,8 +439,10 @@ function castSkyStrike(world) {
 }
 
 // 单道闪电：结算伤害/感电 + 生成闪电视觉（锯齿路径预生成，渲染层只画）
-function resolveSkyStrike(world, x, y, radius, dmg) {
+// opts.minor = true 表示雷雨区内的次级落雷：不再弹射电弧、不再生成新雷暴（防递归）
+function resolveSkyStrike(world, x, y, radius, dmg, opts = {}) {
   const color = SKILLS.shock.color;
+  const minor = !!opts.minor;
   // 预生成闪电折线：从屏幕顶 (x,0) 落到 (x,y)，中途随机横向抖动
   const bolt = [];
   const segs = 6;
@@ -437,20 +452,59 @@ function resolveSkyStrike(world, x, y, radius, dmg) {
     bolt.push({ x: x + jx, y: y * t });
   }
   bolt[segs] = { x, y };
-  world.strikes.push({ x, y, radius, bolt, color, life: 280, maxLife: 280 });
+  const life = minor ? 200 : 280;
+  world.strikes.push({ x, y, radius, bolt, color, life, maxLife: life, minor });
   addRing(world, x, y, radius, color);
+  const struck = [];
   for (const e of world.enemies) {
     if (!e.alive) continue;
     const rr = radius + e.radius;
     if (dist2(x, y, e.x, e.y) <= rr * rr) {
       dealDamage(world, e, dmg, 'shock');
       apply(e.st, 'shock', 0.6, 2600 + world.mods.shockDurBonus, { sourceId: 'skill-shock', sourceLevel: 1, displaceType: 'normal' });
+      struck.push(e);
+    }
+  }
+  if (!minor) {
+    const m = world.mods, sk = SKILLS.shock;
+    // 15 级「弹射电弧」：落点向附近（未被主闪电覆盖的）敌人弹射 —— 补落点边缘的散兵
+    if (m.shockArc > 0) {
+      const cands = world.enemies
+        .filter((e) => e.alive && !struck.includes(e))
+        .map((e) => ({ e, d: dist2(x, y, e.x, e.y) }))
+        .filter((it) => it.d <= sk.arcRange * sk.arcRange)
+        .sort((a, b) => a.d - b.d)
+        .slice(0, sk.arcCount);
+      for (const { e } of cands) {
+        addArc(world, x, y, e.x, e.y, color);
+        dealDamage(world, e, dmg * sk.arcRatio, 'shock');
+        apply(e.st, 'shock', 0.6, 2600 + m.shockDurBonus, { sourceId: 'skill-shock', sourceLevel: 1, displaceType: 'normal' });
+      }
+    }
+    // 20 级「雷暴」：落点形成短暂雷雨区（同一时间只保留一片，重复施放视为刷新位置）
+    if (m.shockStorm > 0 && !world.storms.length) {
+      world.storms.push({ x, y, r: sk.stormR, life: sk.stormMs, maxLife: sk.stormMs, tick: 0, color });
     }
   }
   for (let i = 0; i < 10; i++) {
     const a = Math.random() * Math.PI * 2, sp = 40 + Math.random() * 120;
     addParticle(world, x, y, Math.cos(a) * sp, Math.sin(a) * sp, 300, color, 2);
   }
+}
+
+// 弹射电弧的视觉：落点 → 目标的一条短折线
+function addArc(world, x1, y1, x2, y2, color) {
+  const pts = [];
+  const segs = 4;
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const j = i === 0 || i === segs ? 0 : 10;
+    pts.push({
+      x: x1 + (x2 - x1) * t + (Math.random() * 2 - 1) * j,
+      y: y1 + (y2 - y1) * t + (Math.random() * 2 - 1) * j,
+    });
+  }
+  world.arcs.push({ pts, color, life: 220, maxLife: 220 });
 }
 
 export function castSkill(world, id) {
@@ -640,6 +694,27 @@ export function update(world, dtMs) {
   for (const f of world.floaters) { f.y -= 22 * (dtMs / 1000); f.life -= dtMs; }
   for (const r of world.rings) { r.r += (r.maxR - r.r) * 0.18; r.life -= dtMs; }
   for (const s of world.strikes) s.life -= dtMs;
+  for (const a of world.arcs) a.life -= dtMs;
+  // ── 雷雨区（20 级「雷暴」）：区内持续随机落小闪电 ──
+  for (const s of world.storms) {
+    s.life -= dtMs;
+    s.tick -= dtMs;
+    if (s.life <= 0 || s.tick > 0) continue;
+    s.tick += SKILLS.shock.stormTickMs;
+    const sk = SKILLS.shock;
+    const inside = world.enemies.filter((e) => e.alive && dist2(s.x, s.y, e.x, e.y) <= s.r * s.r);
+    let tx, ty;
+    if (inside.length) {
+      const t = inside[Math.floor(Math.random() * inside.length)];
+      tx = t.x; ty = t.y;
+    } else {
+      // 区内没敌人就落在区内随机点（保留"雷雨在下的感觉"，不浪费表现）
+      const ang = Math.random() * Math.PI * 2, d = Math.sqrt(Math.random()) * s.r;
+      tx = s.x + Math.cos(ang) * d; ty = s.y + Math.sin(ang) * d;
+    }
+    resolveSkyStrike(world, tx, ty, sk.strikeR * sk.stormStrikeRRatio,
+      sk.strikeDmg * world.mods.shockDmgMul * sk.stormDmgRatio, { minor: true });
+  }
   if (world.fortressFlash > 0) world.fortressFlash -= dtMs;
   // 要塞常驻缓回：脱战 3 秒后按 regenPerSec 回复（解耦清波的回血机制，设计册基准）
   if (world.fortressRegenHold > 0) world.fortressRegenHold -= dtMs;
@@ -653,6 +728,8 @@ export function update(world, dtMs) {
   world.bullets = world.bullets.filter((b) => !b.dead);
   world.skillShots = world.skillShots.filter((s) => !s.dead);
   world.strikes = world.strikes.filter((s) => s.life > 0);
+  world.arcs = world.arcs.filter((a) => a.life > 0);
+  world.storms = world.storms.filter((s) => s.life > 0);
   world.particles = world.particles.filter((p2) => p2.life > 0);
   world.floaters = world.floaters.filter((f) => f.life > 0);
   world.rings = world.rings.filter((r) => r.life > 0);

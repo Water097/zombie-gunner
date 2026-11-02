@@ -133,8 +133,10 @@ function frame(now) {
 function render() {
   ctx.clearRect(0, 0, WORLD.W, WORLD.H);
   drawBackground();
+  drawStorms();
   drawRings();
   drawStrikes();
+  drawArcs();
   drawEnemies();
   drawSkillShots();
   drawBullets();
@@ -324,12 +326,65 @@ function drawSkillShots() {
 }
 
 // 电磁天雷：从屏幕顶落下的锯齿闪电柱 + 落点电光圈（280ms 渐隐）
+// 雷雨区（20 级「雷暴」）：半透明区域底色 + 呼吸虚线圈 + 区内雨丝
+function drawStorms() {
+  for (const s of world.storms) {
+    const a = Math.max(0, s.life / s.maxLife);
+    const t = world.time / 1000;
+    // 区域底色
+    ctx.globalAlpha = 0.10 * a;
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    // 呼吸虚线圈（提示"这里在下雷雨"）
+    const pulse = 0.5 + 0.5 * Math.sin(t * 8);
+    ctx.globalAlpha = (0.28 + 0.22 * pulse) * a;
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2;
+    ctx.setLineDash([6, 8]);
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.setLineDash([]);
+    // 雨丝：18 列，按时间向下滚，裁剪在圆内
+    ctx.globalAlpha = 0.32 * a;
+    ctx.strokeStyle = s.color; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let i = 0; i < 18; i++) {
+      const dx = (((i * 73) % 100) / 100 * 2 - 1) * s.r;
+      const half = Math.sqrt(Math.max(0, s.r * s.r - dx * dx));
+      if (half <= 2) continue;
+      const phase = ((i * 37) % 100) / 100;
+      const py = s.y - half + ((phase + t * 1.7) % 1) * half * 2;
+      const px = s.x + dx;
+      ctx.moveTo(px, py);
+      ctx.lineTo(px - 1.5, py + 9);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawArcs() {
+  for (const a of world.arcs) {
+    const al = Math.max(0, a.life / a.maxLife);
+    // 外层辉光
+    ctx.globalAlpha = al * 0.35;
+    ctx.strokeStyle = a.color; ctx.lineWidth = 6; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < a.pts.length; i++) { const p = a.pts[i]; if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }
+    ctx.stroke();
+    // 内芯
+    ctx.globalAlpha = al * 0.9;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+
 function drawStrikes() {
   for (const s of world.strikes) {
     const a = Math.max(0, s.life / s.maxLife);
+    const w = s.minor ? 5 : 9; // 雷雨区的次级落雷画细一点，不与主闪电抢视线
     // 外层辉光（粗、半透明黄）
     ctx.globalAlpha = a * 0.35;
-    ctx.strokeStyle = s.color; ctx.lineWidth = 9; ctx.lineJoin = 'round';
+    ctx.strokeStyle = s.color; ctx.lineWidth = w; ctx.lineJoin = 'round';
     ctx.beginPath();
     for (let i = 0; i < s.bolt.length; i++) {
       const p = s.bolt[i];
@@ -338,14 +393,14 @@ function drawStrikes() {
     ctx.stroke();
     // 内芯（细、白亮）
     ctx.globalAlpha = a * 0.95;
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s.minor ? 2 : 3;
     ctx.stroke();
     // 落点电光：填充渐隐圆 + 冲击亮斑
     ctx.globalAlpha = a * 0.22;
     ctx.fillStyle = s.color;
     ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = a * 0.9;
-    ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.minor ? 5 : 8, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
   }
 }

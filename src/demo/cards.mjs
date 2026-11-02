@@ -58,9 +58,9 @@ export const CARDS = [
     apply: (m) => { m.fireRate += 0.25; } },
   // ── 弹道卡（06册3.2.0）：独立乘数不进%桶。只扣 1 tick、弹耗不变；
   //    N=(1+弹道)×(1+连发) 乘法；每颗弹丸伤害按降伤表衰减（每类型上限 3 层）──
-  { id: 'bullet-spread', kind: 'weapon', target: 'weapon', name: '分裂子弹', text: '【子弹】弹道 +1（横向散射）',
+  { id: 'bullet-spread', kind: 'weapon', target: 'weapon', name: '分裂子弹', text: '【子弹】弹道 +1（横向散射）', maxStacks: 3,
     apply: (m) => { m.spreadLanes = Math.min(3, m.spreadLanes + 1); } },
-  { id: 'bullet-double', kind: 'weapon', target: 'weapon', name: '连发', text: '【子弹】连发 +1（同向多一颗）',
+  { id: 'bullet-double', kind: 'weapon', target: 'weapon', name: '连发', text: '【子弹】连发 +1（同向多一颗）', maxStacks: 3,
     apply: (m) => { m.doubleShot = Math.min(3, m.doubleShot + 1); } },
   { id: 'bullet-pierce', kind: 'weapon', target: 'weapon', name: '穿甲弹头', text: '【子弹】穿透 +1',
     apply: (m) => { m.pierceBonus += 1; } },
@@ -85,6 +85,11 @@ export const CARDS = [
     apply: (m) => { m.shockCount += 1; } },
   { id: 'shock-dur', kind: 'skill', target: 'shock', name: '过载电容', text: '【电磁】感电时长 +1.5 秒',
     apply: (m) => { m.shockDurBonus += 1500; } },
+  // 质变卡（对应局外 15 / 20 级节点，02 册 2.3）：一次性，拿过就不再进池
+  { id: 'shock-arc', kind: 'skill', target: 'shock', name: '弹射电弧', once: true, text: '【电磁】闪电落点向附近 2 个敌人弹射电弧（40% 伤害）',
+    apply: (m) => { m.shockArc = 1; } },
+  { id: 'shock-storm', kind: 'skill', target: 'shock', name: '雷暴', once: true, text: '【电磁】落点形成雷雨区，2 秒内持续落小闪电',
+    apply: (m) => { m.shockStorm = 1; } },
 
   // ── 加成卡 A 类：放大器（要求对应技能已学，否则是废卡）──
   // 强度纪律：条件卡 ≈ 同类无条件卡的 1.5~2 倍（补偿覆盖率；条件越苛刻倍率越高）
@@ -127,6 +132,10 @@ function eligible(world, c) {
     if (world.level >= 10) return false;
     if ((world.cardStacks.rapidlearn || 0) >= 2) return false;
   }
+  // 一次性质变卡（弹射电弧 / 雷暴）：拿过就不再进池
+  if (c.once && (world.cardStacks[c.id] || 0) >= 1) return false;
+  // 有层数上限的卡（弹道 / 连发 各 3 层）：到顶后不再进池，避免发到"看不出效果"的废卡
+  if (c.maxStacks && (world.cardStacks[c.id] || 0) >= c.maxStacks) return false;
   return true;
 }
 

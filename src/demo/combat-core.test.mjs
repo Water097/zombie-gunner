@@ -432,5 +432,83 @@ console.log('— 快速学习：一局最多 2 张，只在 10 级之前出现 �
   ok('已拿 2 张后绝迹', seen === 0);
 }
 
+console.log('— 电磁质变：15 级弹射电弧 / 20 级雷暴 —');
+{
+  // 弹射电弧：主闪电只盖住落点，落点外但在 arcRange(130) 内的敌人靠电弧吃到伤害
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock'); muteSkills(w); w.skills.shock.cd = 0; // 屏蔽自动释放后手动放开电磁
+  const a = makeEnemyEntity('zombie', 225, 300);
+  const b = makeEnemyEntity('zombie', 225, 420); // 距 a 120px：超出主闪电(70+半径)、在电弧射程(130)内
+  w.enemies.push(a, b);
+  w.mods.shockArc = 1;
+  castSkill(w, 'shock');
+  const damaged = w.enemies.filter((e) => e.hp < e.maxHp || !e.alive).length;
+  ok('弹射电弧：落点外的敌人也被电弧命中（两只都掉血）', damaged === 2);
+  ok('弹射电弧生成电弧视觉', w.arcs.length >= 1);
+}
+{
+  // 没点弹射电弧时，落点外敌人不应掉血（对照组）
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock'); muteSkills(w); w.skills.shock.cd = 0; // 屏蔽自动释放后手动放开电磁
+  const a = makeEnemyEntity('zombie', 225, 300);
+  const b = makeEnemyEntity('zombie', 225, 420);
+  w.enemies.push(a, b);
+  castSkill(w, 'shock');
+  ok('无电弧卡时落点外敌人不受影响', w.arcs.length === 0);
+}
+{
+  // 雷暴：施放生成雷雨区，区内按时落次级闪电；次级落雷不再弹射电弧（防递归）
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock'); muteSkills(w); w.skills.shock.cd = 0; // 屏蔽自动释放后手动放开电磁
+  w.enemies.push(makeEnemyEntity('zombie', 225, 300), makeEnemyEntity('zombie', 225, 420));
+  w.mods.shockArc = 1; w.mods.shockStorm = 1;
+  castSkill(w, 'shock');
+  ok('雷暴：施放后生成雷雨区', w.storms.length === 1);
+  ok('雷雨区半径 / 时长符合 SKILLS 基准', w.storms[0].r === 140 && w.storms[0].maxLife === 2000);
+  const arcsAfterCast = w.arcs.length;
+  update(w, 420); // 跨过一个落雷间隔（400ms）
+  ok('雷雨区按时落次级闪电', w.strikes.filter((s) => s.minor).length >= 1);
+  ok('次级落雷不再弹射电弧（防递归）', w.arcs.length <= arcsAfterCast);
+  // 走完 2 秒（升级弹选卡会暂停时间，这里顺手把卡选掉）
+  for (let i = 0; i < 300 && w.storms.length; i++) { if (w.cardPhase) chooseCard(w, 0); update(w, 16); }
+  ok('雷雨区到时消失', w.storms.length === 0);
+}
+{
+  // 一次性质变卡：拿过后不再进池
+  const mock = (stacks) => ({
+    level: 8, skills: { shock: { cd: 0 } }, bonusTaken: 0,
+    slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 3 }, cardStacks: stacks || {},
+  });
+  let seenArc = 0, seenStorm = 0;
+  for (let i = 0; i < 300; i++) {
+    const picks = rollCards(mock());
+    if (picks.some((c) => c.id === 'shock-arc')) seenArc++;
+    if (picks.some((c) => c.id === 'shock-storm')) seenStorm++;
+  }
+  ok('弹射电弧 / 雷暴未拿时进池', seenArc > 0 && seenStorm > 0);
+  let again = 0;
+  for (let i = 0; i < 300; i++) {
+    const picks = rollCards(mock({ 'shock-arc': 1, 'shock-storm': 1 }));
+    if (picks.some((c) => c.id === 'shock-arc' || c.id === 'shock-storm')) again++;
+  }
+  ok('一次性卡拿过后不再进池', again === 0);
+}
+{
+  // 层数上限卡（弹道/连发 各 3 层）：到顶后不再进池，避免抽到无效卡
+  const mock = (stacks) => ({
+    level: 8, skills: { shock: { cd: 0 } }, bonusTaken: 0,
+    slotLevels: { weapon: 6, freeze: 0, burn: 0, shock: 0 }, cardStacks: stacks || {},
+  });
+  let before = 0, after = 0;
+  for (let i = 0; i < 300; i++) {
+    const p = rollCards(mock());
+    if (p.some((c) => c.id === 'bullet-spread')) before++;
+    const q = rollCards(mock({ 'bullet-spread': 3 }));
+    if (q.some((c) => c.id === 'bullet-spread')) after++;
+  }
+  ok('弹道卡未满 3 层时可进池', before > 0);
+  ok('弹道卡满 3 层后不再进池（不发废卡）', after === 0);
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);
