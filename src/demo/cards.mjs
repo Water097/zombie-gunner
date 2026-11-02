@@ -110,10 +110,25 @@ function eligible(world, c) {
   return true;
 }
 
-// 该卡权重（受所属线等级衰减）
+// ── 海克斯池算法（2026-11-02 用户拍板：方案四 = 软衰减 + 硬保底）──
+// 目标：玩家可以偏科（越拿某方向越容易继续出），但**单次三选一绝不会被同一方向占满**，
+//      永远至少有 1 张来自别的方向，保住"选择感"。
+//   软衰减：某方向每拿 1 张卡，该方向后续出现权重 ×0.8（越吃越稀有，冷落方向相对变多）
+//   硬保底：单次三选一，同一方向最多出现 2 张（3 张里必有 1 张异向）
+const SOFT_DECAY = 0.8;          // 每拿 1 张同方向卡，权重乘子
+const MAX_PER_CATEGORY = 2;      // 单次三选一同方向上限
+
+// 卡的"方向"（软衰减与硬保底共用）：学习卡 / 武器线 / 各技能线 / 通用加成
+function categoryOf(c) {
+  if (c.kind === 'learn') return 'learn';
+  return c.target || c.kind;     // weapon / freeze / burn / shock / bonus(通用)
+}
+
+// 该卡权重（受所属线等级衰减 × 软衰减）
 function weightOf(world, c) {
   const lv = c.target ? (world.slotLevels[c.target] || 0) : 0;
-  return lineDecay(lv);
+  const taken = c.target ? (world.slotLevels[c.target] || 0) : (world.cardStacks[c.id] || 0);
+  return lineDecay(lv) * Math.pow(SOFT_DECAY, taken);
 }
 
 function weightedPick(pool) {
@@ -141,6 +156,9 @@ export function rollCards(world) {
   const remaining = MAX_LEVEL - world.level;
   const canLearn = learnedCount < 3 && remaining >= 4;
 
+  // 方向计数（硬保底用）：本次三选一里每个方向已占几张
+  const catCount = (c) => picks.filter((p) => categoryOf(p) === categoryOf(c)).length;
+
   // 学习技能卡池（未学的才进池）
   const learnPool = LEARN_CARDS
     .filter((c) => !world.skills[c.target])
@@ -158,12 +176,14 @@ export function rollCards(world) {
   }
 
   // ③ 补齐到 3 张（可含学习卡，但受停发公式约束）
+  //    硬保底：同方向最多 MAX_PER_CATEGORY 张；池子被方向约束榨干时才放宽
   let guard = 0;
   while (picks.length < 3 && guard++ < 80) {
     const rest = buildPool().concat(canLearn ? learnPool : []);
     const pool = rest.filter((it) => !taken(it.card));
     if (!pool.length) break;
-    const c = weightedPick(pool);
+    const relaxed = pool.filter((it) => catCount(it.card) < MAX_PER_CATEGORY);
+    const c = weightedPick(relaxed.length ? relaxed : pool);
     if (c && !taken(c)) picks.push(c);
   }
 

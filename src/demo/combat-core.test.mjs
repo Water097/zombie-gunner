@@ -8,7 +8,7 @@ import {
   createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
   PLAYER, ENEMY_TYPES, FORTRESS,
 } from './combat-core.mjs';
-import { LEARN_CARDS, xpForLevel } from './cards.mjs';
+import { LEARN_CARDS, xpForLevel, rollCards } from './cards.mjs';
 import { makeEnemy, apply, has } from '../status/status-system.mjs';
 
 let passed = 0, failed = 0;
@@ -290,6 +290,28 @@ console.log('— 技能槽位 = 学习先后顺序（不是写死的技能→槽
   const order = Object.keys(w.skills);
   ok('学习顺序 = 槽位顺序：电→温→冰', order.join(',') === 'shock,burn,freeze');
   ok('后学的技能只往后追加，不插队', order[2] === 'freeze');
+}
+
+console.log('— 海克斯池方案四：软衰减 + 硬保底（同方向单次最多 2 张）—');
+{
+  const catOf = (c) => c.kind === 'learn' ? 'learn' : (c.target || c.kind);
+  const w = createWorld(); w.running = true;
+  // 重度武器偏科场景：武器 10 张、三技能已学各 2 张
+  w.skills = { freeze: { cd: 0 }, burn: { cd: 0 }, shock: { cd: 0 } };
+  w.slotLevels = { weapon: 10, freeze: 2, burn: 2, shock: 2 };
+  w.level = 14; w.bonusTaken = 4;
+  let violated = 0, weaponOnly = 0, nonWeaponEveryRoll = 0, n = 0;
+  for (let i = 0; i < 300; i++) {
+    const picks = rollCards(w).filter((c) => c.kind !== 'function');
+    if (picks.length < 3) continue;
+    n++;
+    const cats = picks.map(catOf);
+    if (new Set(cats).size === 1) violated++;
+    if (cats.every((c) => c === 'weapon')) weaponOnly++;
+    if (cats.some((c) => c !== 'weapon')) nonWeaponEveryRoll++;
+  }
+  ok('硬保底：300 抽无一局三张同方向', n > 250 && violated === 0);
+  ok('武器偏科 10 级后仍偶见武器卡（软衰减 ≠ 归零）', weaponOnly === 0 && nonWeaponEveryRoll === n);
 }
 
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
