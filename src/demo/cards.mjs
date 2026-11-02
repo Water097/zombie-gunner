@@ -47,7 +47,7 @@ export function bonusBudget(level) {
 export const LEARN_CARDS = [
   { id: 'learn-freeze', kind: 'learn', target: 'freeze', name: '干冰弹', text: '学会【干冰弹】· 冰系穿透，冻结敌人' },
   { id: 'learn-burn', kind: 'learn', target: 'burn', name: '温压弹', text: '学会【温压弹】· 火系爆炸，灼烧敌人' },
-  { id: 'learn-shock', kind: 'learn', target: 'shock', name: '电磁穿刺', text: '学会【电磁穿刺】· 雷击穿透，麻痹敌人' },
+  { id: 'learn-shock', kind: 'learn', target: 'shock', name: '电磁天雷', text: '学会【电磁天雷】· 随机降下闪电，范围感电' },
 ];
 
 export const CARDS = [
@@ -68,8 +68,15 @@ export const CARDS = [
     apply: (m) => { m.burnRadiusMul += 0.3; } },
   { id: 'burn-dmg', kind: 'skill', target: 'burn', name: '高温装药', text: '【温压弹】灼烧伤害 +60%',
     apply: (m) => { m.burnDmgMul += 0.6; } },
+  // ── 电磁卡（天雷形态，2026-11-02 重定）：加伤害 / 减冷却 / 加感电范围 / 加闪电数量 / 加感电时长 ──
+  { id: 'shock-dmg', kind: 'skill', target: 'shock', name: '高压雷球', text: '【电磁】闪电伤害 +60%',
+    apply: (m) => { m.shockDmgMul += 0.6; } },
   { id: 'shock-cd', kind: 'skill', target: 'shock', name: '电容扩容', text: '【电磁】冷却 -25%',
     apply: (m) => { m.skillCdMul.shock *= 0.75; } },
+  { id: 'shock-area', kind: 'skill', target: 'shock', name: '电场扩张', text: '【电磁】感电范围 +30%',
+    apply: (m) => { m.shockRadiusMul += 0.3; } },
+  { id: 'shock-count', kind: 'skill', target: 'shock', name: '引雷针', text: '【电磁】闪电数量 +1',
+    apply: (m) => { m.shockCount += 1; } },
   { id: 'shock-dur', kind: 'skill', target: 'shock', name: '过载电容', text: '【电磁】感电时长 +1.5 秒',
     apply: (m) => { m.shockDurBonus += 1500; } },
 

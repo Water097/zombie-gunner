@@ -134,6 +134,7 @@ function render() {
   ctx.clearRect(0, 0, WORLD.W, WORLD.H);
   drawBackground();
   drawRings();
+  drawStrikes();
   drawEnemies();
   drawSkillShots();
   drawBullets();
@@ -305,7 +306,7 @@ function drawSkillShots() {
       ctx.globalAlpha = 1;
     } else {
       const ang = Math.atan2(s.vy, s.vx);
-      const len = s.id === 'shock' ? 34 : 20;
+      const len = 20;
       ctx.save();
       ctx.translate(s.x, s.y); ctx.rotate(ang);
       ctx.globalAlpha = 0.3; ctx.fillStyle = s.color;
@@ -319,6 +320,33 @@ function drawSkillShots() {
       ctx.globalAlpha = 1;
       ctx.restore();
     }
+  }
+}
+
+// 电磁天雷：从屏幕顶落下的锯齿闪电柱 + 落点电光圈（280ms 渐隐）
+function drawStrikes() {
+  for (const s of world.strikes) {
+    const a = Math.max(0, s.life / s.maxLife);
+    // 外层辉光（粗、半透明黄）
+    ctx.globalAlpha = a * 0.35;
+    ctx.strokeStyle = s.color; ctx.lineWidth = 9; ctx.lineJoin = 'round';
+    ctx.beginPath();
+    for (let i = 0; i < s.bolt.length; i++) {
+      const p = s.bolt[i];
+      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+    // 内芯（细、白亮）
+    ctx.globalAlpha = a * 0.95;
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 3;
+    ctx.stroke();
+    // 落点电光：填充渐隐圆 + 冲击亮斑
+    ctx.globalAlpha = a * 0.22;
+    ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = a * 0.9;
+    ctx.beginPath(); ctx.arc(s.x, s.y, 8, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
   }
 }
 

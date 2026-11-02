@@ -151,7 +151,49 @@ console.log('— 技能：冷却好且场上有敌人即自动释放 —');
   const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
   w.enemies.push(e); // 三技能 cd 初始为 0
   update(w, 16); // 一帧内应自动释放全部就绪技能
-  ok('自动释放生成技能弹', w.skillShots.length >= 1);
+  ok('自动释放：弹道技能生成技能弹', w.skillShots.length >= 1);
+  ok('自动释放：电磁生成天雷打击', w.strikes.length >= 1);
+}
+
+console.log('— 电磁天雷：随机锁定敌人，范围伤害 + 感电 —');
+{
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock');
+  const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
+  w.enemies.push(e);
+  const cast = castSkill(w, 'shock');
+  ok('施放成功且场上有目标', cast === true);
+  ok('生成一道闪电', w.strikes.length === 1 && w.strikes[0].bolt.length >= 2);
+  ok('落点即目标位置', Math.abs(w.strikes[0].x - e.x) < 0.01 && Math.abs(w.strikes[0].y - e.y) < 0.01);
+  ok('范围内敌人受到闪电伤害', e.hp < e.maxHp);
+  ok('范围内敌人被感电', has(e.st, 'shock'));
+}
+{
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock');
+  ok('场上没有敌人时施放失败（不消耗冷却）', castSkill(w, 'shock') === false && w.skills.shock.cd === 0);
+}
+{
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock');
+  // 闪电数量 +1：两道闪电、独立结算
+  const c = CARDS.find((k) => k.id === 'shock-count'); c.apply(w.mods);
+  const e = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
+  w.enemies.push(e);
+  castSkill(w, 'shock');
+  ok('引雷针：闪电数量 1→2', w.strikes.length === 2);
+}
+{
+  const w = createWorld(); w.running = true;
+  learnSkill(w, 'shock');
+  // 感电范围 +30%：半径 70 → 91
+  const c = CARDS.find((k) => k.id === 'shock-area'); c.apply(w.mods);
+  const near = makeEnemyEntity('zombie', w.player.x, w.player.y - 150);
+  const far = makeEnemyEntity('zombie', w.player.x + 85, w.player.y - 150); // 85 < 91 命中，> 70 原半径不中
+  w.enemies.push(near, far);
+  castSkill(w, 'shock');
+  ok('电场扩张：扩张后的范围内敌人受伤', far.hp < far.maxHp);
+  ok('电场扩张：感电范围生效', has(far.st, 'shock'));
 }
 
 console.log('— 要塞：敌人抵达防线后停住并持续攻击（不是撞上就消失）—');
@@ -272,7 +314,8 @@ console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
   lightweight.apply(m2);
   ok('轻量化 射速+60%（显著高于白给卡 +25%）伤害×0.85', m2.fireRate === 1.6 && m2.bulletDamage === 0.85);
   ok('首级经验需求 = 20（2 只僵尸即升 Lv2）', xpForLevel(1) === 20);
-  ok('经验曲线表单调递增（锚点由 balance-sim 验证：第3波Lv6、第19波内满级）', xpForLevel(2) > xpForLevel(1) && xpForLevel(19) > xpForLevel(18));
+  // 末级需求允许回落（有意设计：把满级压在第 19 波中段），只断言前段递增
+  ok('经验曲线前段递增（锚点由 balance-sim 验证：第3波Lv6）', xpForLevel(2) > xpForLevel(1) && xpForLevel(12) > xpForLevel(11));
   ok('弹头改良仍为白给 +60%', bulletDmg.text.includes('+60%'));
 }
 

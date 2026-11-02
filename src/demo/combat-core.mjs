@@ -60,9 +60,10 @@ export const ENEMY_TYPES = {
   armored: { name: '装甲尸车', targetType: 'armored', hp: 300, speed: 10, radius: 24, color: '#577590', score: 200, xp: 40, atkDmg: 9, atkIntervalMs: 2000, vehicleLevel: 20 },
 };
 
-// ── 三技能（9 技能里的代表：冰弹穿透 / 温压爆炸 / 电磁雷击）──
-// 对齐 02 册：每个技能是"独立攻击体系 + 弹道"，不是要塞静态光环。
-// 设计形态：温压=点→圆（落点爆炸）／干冰=点→小圆（穿透）／电磁=线（穿透溅射）。
+// ── 三技能（9 技能里的代表：冰弹穿透 / 温压爆炸 / 电磁天雷）──
+// 对齐 02 册：每个技能是"独立攻击体系"，不是要塞静态光环。
+// 设计形态（2026-11-02 用户重定电磁）：温压=点→圆（落点爆炸）／干冰=点→小圆（穿透弹）／
+//   电磁=锁敌天雷——随机锁定场上一个敌人，从天而降的闪电打击：范围伤害 + 感电（与干冰的穿透弹形态区分）。
 // 冷却好且场上有敌人即自动释放（对齐向僵尸开炮手感）；按钮可提前触发。
 // 命中后才"申请施加"状态（apply），伤害/控制结算只问 status-system。
 export const SKILLS = {
@@ -80,14 +81,11 @@ export const SKILLS = {
       apply(e.st, 'knock', m.burnKnock, 0, { sourceId: 'skill-burn', sourceLevel: 1, displaceType: 'normal' }); // 普通位移，装甲不免疫
     },
   },
+  // ⚠️ 临时基准值：strikeR/strikeDmg 待数值阶段统一校准
   shock: {
     name: '电磁', key: '3', color: '#ffe14d', cooldownMs: 10000,
-    speed: 420, pierce: true, explodeR: 0, radius: 5, knock: 40, // 速度由 1000 下调：原值太快看不见弹道
-    hit: (e, m) => {
-      apply(e.st, 'stun', 1, 1100, { sourceId: 'skill-shock', sourceLevel: 1, displaceType: 'normal' });
-      apply(e.st, 'shock', 0.6, 2600 + m.shockDurBonus, { sourceId: 'skill-shock', sourceLevel: 1, displaceType: 'normal' });
-      apply(e.st, 'knock', 40, 0, { sourceId: 'skill-shock', sourceLevel: 1, displaceType: 'normal' }); // 普通位移，装甲不免疫
-    },
+    strikeR: 70,    // 感电打击半径（闪电落点的伤害/感电范围）
+    strikeDmg: 45,  // 单次闪电伤害（55 → 45：天雷 AoE 会推快经验供给，压住满级点不漂移）
   },
 };
 
@@ -105,6 +103,9 @@ function defaultMods() {
     burnDmgMul: 1,        // 灼烧伤害倍率
     burnKnock: 25,        // 温压击退距离
     shockDurBonus: 0,     // 感电时长加值 ms
+    shockDmgMul: 1,       // 闪电伤害倍率（高压雷球）
+    shockRadiusMul: 1,    // 感电打击半径倍率（电场扩张）
+    shockCount: 0,        // 额外闪电数量（引雷针）
     dmgVsFrozen: 1,       // 破冰：对冻结目标
     dmgVsBurn: 1,         // 助燃：对燃烧目标
     dmgVsShock: 1,        // 导电体：对感电目标
@@ -128,6 +129,7 @@ export function createWorld() {
     enemies: [],
     bullets: [],
     skillShots: [],
+    strikes: [],  // 电磁天雷的视觉残留（闪电柱 + 落点电圈，纯表现层，伤害在施放时瞬时结算）
     particles: [],
     floaters: [],
     rings: [],
@@ -234,7 +236,7 @@ function dealDamage(world, enemy, raw, source = 'weapon') {
   enemy.hitFlash = 90;
   if (gate > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×3  ${Math.round(dmg)}`, '#ff4d4d');
   else if (cond.tag) addFloater(world, enemy.x, enemy.y - enemy.radius, `${cond.tag} ${Math.round(dmg)}`, cond.color);
-  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : '#ffffff');
+  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : '#ffffff');
   if (enemy.hp <= 0) killEnemy(world, enemy);
 }
 
@@ -392,6 +394,50 @@ export function manualReload(world) {
   startReload(world);
 }
 
+// ── 电磁天雷（2026-11-02 用户重定形态）：随机锁定场上敌人，从天而降的闪电打击 ──
+// 闪电数量 = 1 + shockCount（引雷针卡）；每次闪电独立随机选目标（可重复锁定同一只）。
+// 落点半径内所有敌人：受伤 + 感电。瞬时结算，strikes 只留视觉。
+function castSkyStrike(world) {
+  const m = world.mods, sk = SKILLS.shock;
+  const alive = world.enemies.filter((e) => e.alive);
+  if (!alive.length) return false;
+  const radius = sk.strikeR * m.shockRadiusMul;
+  const count = 1 + Math.round(m.shockCount);
+  for (let i = 0; i < count; i++) {
+    const tgt = alive[Math.floor(Math.random() * alive.length)];
+    resolveSkyStrike(world, tgt.x, tgt.y, radius, sk.strikeDmg * m.shockDmgMul);
+  }
+  return true;
+}
+
+// 单道闪电：结算伤害/感电 + 生成闪电视觉（锯齿路径预生成，渲染层只画）
+function resolveSkyStrike(world, x, y, radius, dmg) {
+  const color = SKILLS.shock.color;
+  // 预生成闪电折线：从屏幕顶 (x,0) 落到 (x,y)，中途随机横向抖动
+  const bolt = [];
+  const segs = 6;
+  for (let i = 0; i <= segs; i++) {
+    const t = i / segs;
+    const jx = i === 0 || i === segs ? 0 : (Math.random() * 2 - 1) * 22;
+    bolt.push({ x: x + jx, y: y * t });
+  }
+  bolt[segs] = { x, y };
+  world.strikes.push({ x, y, radius, bolt, color, life: 280, maxLife: 280 });
+  addRing(world, x, y, radius, color);
+  for (const e of world.enemies) {
+    if (!e.alive) continue;
+    const rr = radius + e.radius;
+    if (dist2(x, y, e.x, e.y) <= rr * rr) {
+      dealDamage(world, e, dmg, 'shock');
+      apply(e.st, 'shock', 0.6, 2600 + world.mods.shockDurBonus, { sourceId: 'skill-shock', sourceLevel: 1, displaceType: 'normal' });
+    }
+  }
+  for (let i = 0; i < 10; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 40 + Math.random() * 120;
+    addParticle(world, x, y, Math.cos(a) * sp, Math.sin(a) * sp, 300, color, 2);
+  }
+}
+
 export function castSkill(world, id) {
   if (world.gameOver) return false;
   const sk = SKILLS[id];
@@ -399,6 +445,15 @@ export function castSkill(world, id) {
   const slot = world.skills[id];
   if (!slot || slot.cd > 0) return false;
   const m = world.mods;
+
+  // 电磁天雷：不走弹道，施放即结算——随机锁定场上敌人，从天而降的闪电打击
+  if (id === 'shock') {
+    if (!castSkyStrike(world)) return false; // 场上没有敌人：不消耗冷却
+    world.petFlash = 320; // 机器人出手闪光
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+
   // 技能由宠物机器人释放：发射原点是机器人，不是要塞炮塔
   const pet = petPos(world);
   // 自动瞄准：取射程内最近敌人；无目标则朝正上方（避免空放）
@@ -569,6 +624,7 @@ export function update(world, dtMs) {
   for (const pt of world.particles) { pt.x += pt.vx * (dtMs / 1000); pt.y += pt.vy * (dtMs / 1000); pt.life -= dtMs; }
   for (const f of world.floaters) { f.y -= 22 * (dtMs / 1000); f.life -= dtMs; }
   for (const r of world.rings) { r.r += (r.maxR - r.r) * 0.18; r.life -= dtMs; }
+  for (const s of world.strikes) s.life -= dtMs;
   if (world.fortressFlash > 0) world.fortressFlash -= dtMs;
   // 要塞常驻缓回：脱战 3 秒后按 regenPerSec 回复（解耦清波的回血机制，设计册基准）
   if (world.fortressRegenHold > 0) world.fortressRegenHold -= dtMs;
@@ -581,6 +637,7 @@ export function update(world, dtMs) {
   world.enemies = world.enemies.filter((e) => e.alive);
   world.bullets = world.bullets.filter((b) => !b.dead);
   world.skillShots = world.skillShots.filter((s) => !s.dead);
+  world.strikes = world.strikes.filter((s) => s.life > 0);
   world.particles = world.particles.filter((p2) => p2.life > 0);
   world.floaters = world.floaters.filter((f) => f.life > 0);
   world.rings = world.rings.filter((r) => r.life > 0);
