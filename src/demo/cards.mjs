@@ -56,6 +56,12 @@ export const CARDS = [
     apply: (m) => { m.bulletDamage += 0.6; } },
   { id: 'bullet-rate', kind: 'weapon', target: 'weapon', name: '枪机轻量化', text: '【子弹】射速 +25%',
     apply: (m) => { m.fireRate += 0.25; } },
+  // ── 弹道卡（06册3.2.0）：独立乘数不进%桶。只扣 1 tick、弹耗不变；
+  //    N=(1+弹道)×(1+连发) 乘法；每颗弹丸伤害按降伤表衰减（每类型上限 3 层）──
+  { id: 'bullet-spread', kind: 'weapon', target: 'weapon', name: '分裂子弹', text: '【子弹】弹道 +1（横向散射）',
+    apply: (m) => { m.spreadLanes = Math.min(3, m.spreadLanes + 1); } },
+  { id: 'bullet-double', kind: 'weapon', target: 'weapon', name: '连发', text: '【子弹】连发 +1（同向多一颗）',
+    apply: (m) => { m.doubleShot = Math.min(3, m.doubleShot + 1); } },
   { id: 'bullet-pierce', kind: 'weapon', target: 'weapon', name: '穿甲弹头', text: '【子弹】穿透 +1',
     apply: (m) => { m.pierceBonus += 1; } },
 
@@ -88,8 +94,7 @@ export const CARDS = [
     apply: (m) => { m.dmgVsBurn += 0.35; } },
   { id: 'conductor', kind: 'bonus', target: 'shock', name: '导电体', text: '对【感电】目标伤害 +25%',
     apply: (m) => { m.dmgVsShock += 0.25; } },
-  { id: 'crossfire', kind: 'bonus', target: 'weapon', name: '交叉火力', text: '场上敌人 ≥8 时【子弹】伤害 +100%',
-    apply: (m) => { m.crossfire += 1.0; } },
+  // ❌ 交叉火力已删除（2026-11-02 用户：场上敌人≥8 几乎常驻，等于白给+100%，超模）
 
   // ── 加成卡 B 类：代价型 ──
   // 代价卡定价纪律（2026-11-02 用户提出）：收益必须显著高于同类白给卡，否则是废卡。

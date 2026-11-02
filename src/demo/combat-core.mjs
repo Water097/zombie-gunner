@@ -98,6 +98,8 @@ function defaultMods() {
     fireRate: 1,          // 射速倍率（间隔 = 基础 / 此值）
     reloadMul: 1,         // 换弹时间倍率（代价卡用；弹匣容量已固定）
     pierceBonus: 0,       // 穿透加值
+    spreadLanes: 0,       // 分裂子弹层数 a（散射弹道，上限 3）
+    doubleShot: 0,        // 连发层数 b（同向多发，上限 3）
     freezeDurBonus: 0,    // 冻结时长加值 ms
     burnRadiusMul: 1,     // 温压爆炸半径倍率
     burnDmgMul: 1,        // 灼烧伤害倍率
@@ -109,7 +111,6 @@ function defaultMods() {
     dmgVsFrozen: 1,       // 破冰：对冻结目标
     dmgVsBurn: 1,         // 助燃：对燃烧目标
     dmgVsShock: 1,        // 导电体：对感电目标
-    crossfire: 1,         // 交叉火力：场上敌人 ≥8 时生效
     xpRate: 1,            // 快速学习
     skillCdMul: { freeze: 1, burn: 1, shock: 1 },
   };
@@ -256,13 +257,9 @@ function conditionMultiplier(world, enemy) {
       if (!tag) { tag = a.tag; color = a.color; }
     }
   }
-  if (m.crossfire > 1 && world.enemies.length >= 8) {
-    d *= m.crossfire;
-    if (!tag) { tag = '交叉'; color = '#ff6b6b'; }
-  }
+  // ❌ 交叉火力已删除（2026-11-02）：常驻条件增伤超模
   return { mult: d, tag, color };
 }
-
 function killEnemy(world, enemy, scored = true) {
   if (!enemy.alive) return;
   enemy.alive = false;
@@ -360,24 +357,42 @@ function acquireTarget(world) {
   return best;
 }
 
+// 弹道经济（06册3.2.0）：N=(1+a)×(1+b) 乘法；一枪只扣 1 tick（弹夹=扳机次数）；
+// 每颗弹丸伤害按降伤表衰减（第 k 张同类卡 ×0.65/×0.833/×0.90，每类型上限 3 层）
+export function pelletFactor(k) {
+  const P = [1, 0.65, 0.65 * 0.833, 0.65 * 0.833 * 0.9];
+  return P[Math.min(k, 3)];
+}
+export function bulletsPerShot(m) {
+  return (1 + m.spreadLanes) * (1 + m.doubleShot);
+}
+
 function fire(world, target) {
   const p = world.player;
   const m = world.mods;
   const ang = Math.atan2(target.y - p.y, target.x - p.x);
   p.angle = ang;
   const pierce = PLAYER.bulletPierce + m.pierceBonus;
-  world.bullets.push({
-    x: p.x + Math.cos(ang) * 28,
-    y: p.y + Math.sin(ang) * 28,
-    vx: Math.cos(ang) * PLAYER.bulletSpeed,
-    vy: Math.sin(ang) * PLAYER.bulletSpeed,
-    damage: PLAYER.baseDamage * m.bulletDamage,
-    life: 1400,
-    radius: PLAYER.bulletRadius,
-    pierceLeft: pierce,   // 穿透：可连续命中 pierce 个敌人
-    hitIds: [],           // 同一敌人不重复结算
-  });
-  p.ammo -= 1;
+  const perBullet = PLAYER.baseDamage * m.bulletDamage * pelletFactor(m.spreadLanes) * pelletFactor(m.doubleShot);
+  const lanes = 1 + m.spreadLanes;          // 散射：扇面铺开
+  const SPREAD_STEP = 0.07;                 // 相邻弹道间隔 ≈4°
+  for (let lane = 0; lane < lanes; lane++) {
+    const laneAng = ang + (lane - (lanes - 1) / 2) * SPREAD_STEP;
+    for (let d = 0; d < 1 + m.doubleShot; d++) { // 连发：同向同落点
+      world.bullets.push({
+        x: p.x + Math.cos(laneAng) * 28,
+        y: p.y + Math.sin(laneAng) * 28,
+        vx: Math.cos(laneAng) * PLAYER.bulletSpeed,
+        vy: Math.sin(laneAng) * PLAYER.bulletSpeed,
+        damage: perBullet,
+        life: 1400,
+        radius: PLAYER.bulletRadius,
+        pierceLeft: pierce,   // 穿透：可连续命中 pierce 个敌人
+        hitIds: [],           // 同一敌人不重复结算
+      });
+    }
+  }
+  p.ammo -= 1; // 只扣 1 tick：加弹道/连发不增加弹药消耗（06册3.2.0）
   p.fireTimer = PLAYER.fireIntervalMs / m.fireRate;
   if (p.ammo <= 0 && !p.reloading) startReload(world);
 }

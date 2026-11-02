@@ -7,7 +7,7 @@
 //
 // 运行：node src/demo/balance-sim.mjs [--supply]
 
-import { createWorld, update, chooseCard, RUN } from './combat-core.mjs';
+import { createWorld, update, chooseCard, RUN, bulletsPerShot, pelletFactor } from './combat-core.mjs';
 import { MAX_LEVEL } from './cards.mjs';
 
 const STEP = 16;
@@ -18,11 +18,12 @@ const RUNS_PER_STRATEGY = 12;
 //        有对应放大器就吃。代表"正确选择海克斯"的玩家。
 const SMART_PRIORITY = [
   'bullet-dmg', 'bullet-dmg',           // 伤害主轴（允许重复优先）
+  'bullet-spread', 'bullet-double',     // 弹道卡（06册）：清群核心，正确玩家必拿
   'learn-freeze',                        // 专精冰系
   'icebreak',                            // 放大器直接跟线
   'freeze-dur', 'freeze-cd',
   'bullet-rate', 'bullet-pierce',
-  'combust', 'conductor', 'crossfire',   // 其他放大器（拿了也不亏）
+  'combust', 'conductor',                 // 其他放大器（拿了也不亏）
   'burn-dmg', 'shock-dur', 'burn-radius', 'freeze-cd',
   'highpressure', 'rapidlearn', 'lightweight',
 ];
@@ -63,7 +64,8 @@ function runOne(strategy) {
     won: w.won, finalLevel: w.level, wave: w.wave, kills: w.killCount,
     xp: Math.round(w.xpGained), fortressHp: Math.round(w.fortressHp), fortressMin: Math.round(fortressMin),
     seconds: Math.round(w.time / 1000), levelAtWave, xpAtWave,
-    dpsProxy: Math.round(w.mods.bulletDamage * w.mods.fireRate * 100) / 100,
+    dpsProxy: Math.round(w.mods.bulletDamage * w.mods.fireRate * bulletsPerShot(w.mods)
+      * pelletFactor(w.mods.spreadLanes) * pelletFactor(w.mods.doubleShot) * 100) / 100,
     taken: w.cardStacks ? Object.entries(w.cardStacks).map(([k, v]) => `${k}×${v}`).join(' ') : '',
   };
 }

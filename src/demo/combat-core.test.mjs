@@ -6,7 +6,7 @@
 
 import {
   createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
-  PLAYER, ENEMY_TYPES, FORTRESS,
+  PLAYER, ENEMY_TYPES, FORTRESS, bulletsPerShot, pelletFactor,
 } from './combat-core.mjs';
 import { LEARN_CARDS, xpForLevel, rollCards } from './cards.mjs';
 import { makeEnemy, apply, has } from '../status/status-system.mjs';
@@ -304,12 +304,9 @@ console.log('— 回归：子弹击杀触发 onDeath（修复宿主/包装分叉
 
 console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
 {
-  const crossfire = CARDS.find((c) => c.id === 'crossfire');
+  ok('交叉火力已删除（常驻条件增伤超模）', !CARDS.some((c) => c.id === 'crossfire'));
   const lightweight = CARDS.find((c) => c.id === 'lightweight');
   const bulletDmg = CARDS.find((c) => c.id === 'bullet-dmg');
-  const m1 = createWorld().mods;
-  crossfire.apply(m1);
-  ok('交叉火力单层 +100%（≈无条件卡 1.67 倍，条件卡溢价）', m1.crossfire === 2);
   const m2 = createWorld().mods;
   lightweight.apply(m2);
   ok('轻量化 射速+60%（显著高于白给卡 +25%）伤害×0.85', m2.fireRate === 1.6 && m2.bulletDamage === 0.85);
@@ -317,6 +314,36 @@ console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
   // 末级需求允许回落（有意设计：把满级压在第 19 波中段），只断言前段递增
   ok('经验曲线前段递增（锚点由 balance-sim 验证：第3波Lv6）', xpForLevel(2) > xpForLevel(1) && xpForLevel(12) > xpForLevel(11));
   ok('弹头改良仍为白给 +60%', bulletDmg.text.includes('+60%'));
+}
+
+console.log('— 弹道经济（06册3.2.0）：分裂子弹/连发，乘法叠加 + 降伤表 —');
+{
+  const w = createWorld(); w.running = true;
+  w.enemies.push(makeEnemyEntity('zombie', 225, 300));
+  const spread = CARDS.find((c) => c.id === 'bullet-spread');
+  const dbl = CARDS.find((c) => c.id === 'bullet-double');
+  spread.apply(w.mods);
+  update(w, 16); // 开一枪
+  ok('分裂子弹：一次射击 2 颗（扇面散射）', w.bullets.length === 2);
+  ok('只扣 1 tick（弹药 -1 不 -2）', w.player.ammo === PLAYER.magSize - 1);
+  ok('每颗弹丸降伤 ×0.65', w.bullets[0].damage === PLAYER.baseDamage * 0.65);
+}
+{
+  const w = createWorld(); w.running = true;
+  w.enemies.push(makeEnemyEntity('zombie', 225, 300));
+  CARDS.find((c) => c.id === 'bullet-double').apply(w.mods);
+  update(w, 16);
+  ok('连发：一次射击 2 颗（同向）', w.bullets.length === 2 && w.player.ammo === PLAYER.magSize - 1);
+  ok('连发每颗降伤 ×0.65', w.bullets[0].damage === PLAYER.baseDamage * 0.65);
+}
+{
+  const m = createWorld().mods;
+  CARDS.find((c) => c.id === 'bullet-spread').apply(m);
+  CARDS.find((c) => c.id === 'bullet-double').apply(m);
+  ok('散射+1 连发+1：N = 2×2 = 4（乘法叠加）', bulletsPerShot(m) === 4);
+  ok('混搭每颗降伤 0.65×0.65 ≈ 42.3%', Math.abs(pelletFactor(1) * pelletFactor(1) - 0.4225) < 1e-9);
+  for (let i = 0; i < 5; i++) CARDS.find((c) => c.id === 'bullet-spread').apply(m);
+  ok('每类型上限 3 层', m.spreadLanes === 3 && bulletsPerShot(m) === 8);
 }
 
 console.log('— 技能槽位 = 学习先后顺序（不是写死的技能→槽位映射）—');
