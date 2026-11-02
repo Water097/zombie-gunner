@@ -101,6 +101,8 @@ export const CARDS = [
     apply: (m) => { m.fireRate += 0.6; m.bulletDamage *= 0.85; } },
 
   // ── 加成卡 C 类：资源型 ──
+  // 快速学习（2026-11-02 用户拍板）：一局最多 2 张，且只在 10 级之前出现——
+  // 防止它被无限叠加把经验供给推快、满级点漂移（实测 random 策略曾叠 3 张 ×1.75 倍经验）。
   { id: 'rapidlearn', kind: 'bonus', target: null, name: '快速学习', text: '经验获取 +25%',
     apply: (m) => { m.xpRate += 0.25; } },
 ];
@@ -115,6 +117,11 @@ function eligible(world, c) {
   if (c.kind === 'bonus' && world.bonusTaken >= bonusBudget(world.level)) return false;
   if (c.kind === 'skill' && !world.skills[c.target]) return false;              // 只出已学技能
   if (c.kind === 'bonus' && c.target && c.target !== 'weapon' && !world.skills[c.target]) return false; // 放大器要对应技能
+  // 快速学习：一局最多 2 张，只在 10 级之前出现
+  if (c.id === 'rapidlearn') {
+    if (world.level >= 10) return false;
+    if ((world.cardStacks.rapidlearn || 0) >= 2) return false;
+  }
   return true;
 }
 

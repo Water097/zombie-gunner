@@ -85,7 +85,7 @@ export const SKILLS = {
   shock: {
     name: '电磁', key: '3', color: '#ffe14d', cooldownMs: 10000,
     strikeR: 70,    // 感电打击半径（闪电落点的伤害/感电范围）
-    strikeDmg: 45,  // 单次闪电伤害（55 → 45：天雷 AoE 会推快经验供给，压住满级点不漂移）
+    strikeDmg: 55,  // 单次闪电伤害（55 → 45 又回 55：经验供给由出怪节奏决定、与技能伤害基本无关，45 是对模拟噪声的过度修正）
   },
 };
 

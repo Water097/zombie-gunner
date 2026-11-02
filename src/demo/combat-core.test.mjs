@@ -387,5 +387,23 @@ console.log('— 感知层：放大器飘字标注 + DoT 走统一伤害入口 �
   ok('DoT 实际扣血', e.hp < 200 || !e.alive);
 }
 
+console.log('— 快速学习：一局最多 2 张，只在 10 级之前出现 —');
+{
+  // 最小 world 假体：rollCards 只读 level/skills/bonusTaken/slotLevels/cardStacks
+  const mock = (lv, stacks) => ({
+    level: lv, skills: { freeze: { cd: 0 } }, bonusTaken: 0,
+    slotLevels: { weapon: 1, freeze: 3, burn: 0, shock: 0 }, cardStacks: stacks || {},
+  });
+  let seen = 0;
+  for (let i = 0; i < 300; i++) if (rollCards(mock(5)).some((c) => c.id === 'rapidlearn')) seen++;
+  ok('5 级时快速学习可进池', seen > 0);
+  seen = 0;
+  for (let i = 0; i < 300; i++) if (rollCards(mock(10)).some((c) => c.id === 'rapidlearn')) seen++;
+  ok('10 级起快速学习绝迹', seen === 0);
+  seen = 0;
+  for (let i = 0; i < 300; i++) if (rollCards(mock(5, { rapidlearn: 2 })).some((c) => c.id === 'rapidlearn')) seen++;
+  ok('已拿 2 张后绝迹', seen === 0);
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);
