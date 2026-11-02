@@ -5,7 +5,7 @@
 // 运行：node src/demo/combat-core.test.mjs
 
 import {
-  createWorld, update, castSkill, chooseCard, magSizeOf, petPos, CARDS,
+  createWorld, update, castSkill, chooseCard, takeCard, magSizeOf, petPos, CARDS,
   PLAYER, ENEMY_TYPES, FORTRESS, SKILLS, bulletsPerShot, pelletFactor,
 } from './combat-core.mjs';
 import { LEARN_CARDS, xpForLevel, rollCards } from './cards.mjs';
@@ -545,8 +545,11 @@ console.log('— 装甲车：出场 / 多段冲撞 / 击退 / 减速 —');
   let last = e.hp;
   let everSlowed = false; // 减速只持续 2s，6.4s 窗口末已过期，故记录"曾经进入过"
   const yStart = e.y;
-  for (let i = 0; i < 400; i++) { // ≈6.4s：覆盖 lifeMs(5200) + 出场延迟，确保走完全程离场
+  for (let i = 0; i < 520; i++) { // ≈8.3s：覆盖 lifeMs(6500) + 出场延迟，确保走完全程离场
     update(w, 16);
+    // 出怪密度加大后，本窗口内车会碾死自动生成的僵尸 → 升级 → cardPhase 冻结战斗。
+    // 这里专测载具生命周期，直接清掉选卡态继续跑。
+    if (w.cardPhase) { w.cardPhase = false; w.pendingCards = []; }
     if (has(e.st, 'slow')) everSlowed = true;
     if (e.hp < last) { drops.push(Math.round((last - e.hp) * 100) / 100); last = e.hp; }
   }
@@ -559,13 +562,13 @@ console.log('— 装甲车：出场 / 多段冲撞 / 击退 / 减速 —');
 
 console.log('— 装甲车：判定 = 车身矩形 + 速度减半（2026-11-02 粗调）—');
 {
-  ok('车速 420 → 210（调低一倍）', SKILLS.vehicle.speed === 210);
+  ok('车速 420 → 210 → 168（两次下调）', SKILLS.vehicle.speed === 168);
   const w = createWorld(); w.running = true;
   w.enemies.length = 0;
   // 手摆一辆不动的车（vy=0），专门测几何判定
   w.vehicles.push({
     x: 225, y: 400, w: SKILLS.vehicle.bodyW, h: SKILLS.vehicle.bodyH,
-    vy: 0, life: 5200, ramp: 0, hitCd: new Map(), knocked: new Set(),
+    vy: 0, life: 6500, ramp: 0, hitCd: new Map(), knocked: new Set(),
     firstHit: false, heavy: false, color: SKILLS.vehicle.color,
   });
   const inside = makeEnemyEntity('zombie', 225, 400); inside.id = 901; inside.hp = 999; inside.maxHp = 999;
@@ -641,9 +644,12 @@ console.log('— 装甲车：④ 易伤 / ⑤ 眩晕 —');
     w.enemies.push(e);
     castSkill(w, 'vehicle');
     const orig = Math.random;
+    let everStunned = false; // 眩晕只 1s，窗口末已过期，故记录"曾经进入过"
     Math.random = () => 0; // 强制命中眩晕判定
-    try { for (let i = 0; i < 60; i++) update(w, 16); } finally { Math.random = orig; }
-    ok('眩晕判定命中 → 目标眩晕', has(e.st, 'stun'));
+    try {
+      for (let i = 0; i < 130; i++) { update(w, 16); if (has(e.st, 'stun')) everStunned = true; }
+    } finally { Math.random = orig; }
+    ok('眩晕判定命中 → 目标眩晕', everStunned);
   }
 }
 
@@ -792,6 +798,41 @@ console.log('— 子弹属性卡（06 册 §3.2.1）：火 / 爆炸 / 分裂 —
     for (let i = 0; i < 300; i++) if (rollCards(w).some((c) => c.id === 'bullet-sub-dmg')) seen++;
     ok('拿了分裂后，子子弹强化卡才进池', seen > 0);
   }
+}
+
+console.log('— 定制模式（自选海克斯，测试 build 用）—');
+{
+  // 标准模式升级弹三选一；定制模式不弹（由玩家按 C 自己挑）
+  const killOne = (custom) => {
+    const w = createWorld(); w.running = true; w.customMode = custom;
+    const e = makeEnemyEntity('armored', w.player.x, w.player.y - 120); // 装甲车 40xp，够升首级
+    e.id = 701; e.hp = 1; e.maxHp = 1; e.speed = 0;
+    w.enemies.push(e);
+    for (let i = 0; i < 60 && !w.cardPhase && w.level < 2; i++) update(w, 16);
+    return w;
+  };
+  const w1 = killOne(false);
+  ok('标准模式：升级会弹三选一', w1.cardPhase === true && w1.pendingCards.length > 0);
+  const w2 = killOne(true);
+  ok('定制模式：升级不弹随机卡', w2.level >= 2 && w2.cardPhase === false && w2.pendingCards.length === 0);
+
+  // 面板打开 = 战斗暂停
+  const w3 = createWorld(); w3.running = true; w3.panelOpen = true;
+  const t0 = w3.time;
+  for (let i = 0; i < 10; i++) update(w3, 16);
+  ok('面板打开时战斗暂停（世界时间不推进）', w3.time === t0);
+
+  // takeCard：直接给卡，但仍守硬约束
+  const w4 = createWorld(); w4.running = true;
+  const learn = LEARN_CARDS.find((c) => c.id === 'learn-freeze');
+  ok('takeCard 学会技能', takeCard(w4, learn) === true && !!w4.skills.freeze);
+  ok('takeCard 不重复学同一技能', takeCard(w4, learn) === false);
+  const fire = CARDS.find((c) => c.id === 'bullet-fire');
+  ok('takeCard 应用效果并计数', takeCard(w4, fire) === true && w4.mods.bulletFire === 1 && w4.cardStacks['bullet-fire'] === 1);
+  ok('takeCard 不给第二张一次性卡', takeCard(w4, fire) === false);
+  const spread = CARDS.find((c) => c.id === 'bullet-spread');
+  for (let i = 0; i < 5; i++) takeCard(w4, spread);
+  ok('takeCard 仍遵守 3 层上限', w4.mods.spreadLanes === 3 && w4.cardStacks['bullet-spread'] === 3);
 }
 
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);

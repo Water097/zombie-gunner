@@ -9,9 +9,10 @@
 //   宠物机器人 = 悬浮在要塞右侧，负责释放全部技能
 
 import {
-  createWorld, update, castSkill, manualReload, chooseCard, magSizeOf, petPos,
-  WORLD, PLAYER, FORTRESS, ENEMY_TYPES, SKILLS, RUN,
+  createWorld, update, castSkill, manualReload, chooseCard, takeCard, magSizeOf, petPos,
+  CARDS, WORLD, PLAYER, FORTRESS, ENEMY_TYPES, SKILLS, RUN,
 } from './combat-core.mjs';
+import { LEARN_CARDS } from './cards.mjs';
 import { has } from '../status/status-system.mjs';
 
 const canvas = document.getElementById('game');
@@ -23,6 +24,9 @@ let lastT = performance.now();
 let acc = 0;
 const STEP = 1000 / 60; // 固定步长 16.67ms，手感与帧率解耦
 let fps = 60, fpsAccum = 0, fpsFrames = 0;
+// 定制模式（2026-11-02）：开始界面选模式，游戏中按 C 打开卡池面板自选海克斯
+let selectCustom = false;   // 开始界面当前高亮的模式
+let panelTab = 'learn';     // 面板当前分类
 
 // ── 右侧 UI（换算自参考原图）──
 // 武器卡贴在经验条正下方（参考原图：经验条往下一格就是武器卡），技能圆竖排其下、互不重叠
@@ -64,8 +68,15 @@ resize();
 // ── 输入 ──
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') { e.preventDefault(); togglePause(); return; }
-  if (e.code === 'Enter') { if (world.gameOver || !world.running) startGame(); return; }
+  if (e.code === 'Enter') { if (world.gameOver || !world.running) startGame(world.customMode); return; }
   if (e.key === 'r' || e.key === 'R') { manualReload(world); return; }
+  // 定制模式：C 开/关卡池面板（面板打开时 update 早退 = 战斗暂停）
+  if (e.key === 'c' || e.key === 'C') {
+    if (world.customMode && world.started && !world.gameOver && !world.cardPhase) {
+      world.panelOpen = !world.panelOpen;
+    }
+    return;
+  }
   // 选卡时 1/2/3 = 选第几张（界面不显示序号，键盘仍可用）
   if (world.cardPhase && ['1', '2', '3', '4'].includes(e.key)) { chooseCard(world, Number(e.key) - 1); return; }
   // 已学技能：数字键按槽位释放（槽位 = 学习顺序，1 = 最先学的技能）
@@ -99,8 +110,12 @@ function insideRect(r, p) { return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y 
 
 canvas.addEventListener('pointerdown', (e) => {
   const p = canvasToLogical(e.clientX, e.clientY);
-  if (!world.started) { startGame(); return; }
-  if (world.gameOver) { startGame(); return; }
+  if (world.panelOpen) { handlePanelClick(p); return; }  // 面板优先
+  if (!world.started) {                                 // 开始界面：先选模式
+    for (const b of startButtons()) if (insideRect(b, p)) { startGame(b.mode === 'custom'); return; }
+    return;
+  }
+  if (world.gameOver) { startGame(world.customMode); return; }
   if (world.cardPhase) { // 选卡优先
     const rects = cardRects();
     for (let i = 0; i < rects.length; i++) if (insideRect(rects[i], p)) { chooseCard(world, i); return; }
@@ -114,7 +129,14 @@ canvas.addEventListener('pointerdown', (e) => {
   }
 });
 
-function startGame() { world = createWorld(); world.running = true; world.started = true; lastT = performance.now(); acc = 0; }
+function startGame(custom = false) {
+  world = createWorld();
+  world.customMode = !!custom;
+  world.running = true; world.started = true;
+  selectCustom = !!custom;
+  panelTab = 'learn';
+  lastT = performance.now(); acc = 0;
+}
 function togglePause() { if (world.gameOver) return; world.running = !world.running; if (world.running) lastT = performance.now(); }
 
 // ── 主循环（固定步长累加器）──
@@ -147,6 +169,7 @@ function render() {
   drawFloaters();
   drawHUD();
   if (world.cardPhase) drawCardOverlay();
+  if (world.panelOpen) drawCardPanel();
   if (!world.started) drawStartOverlay();
   if (world.gameOver) drawGameOver();
 }
@@ -513,6 +536,12 @@ function drawHUD() {
   drawWeaponCard();
   drawSkillSlots();
 
+  // 定制模式常驻提示（左下，避开右侧武器/技能槽与底部血条）
+  if (world.customMode) {
+    ctx.textAlign = 'left'; ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = world.panelOpen ? '#7fe0ff' : 'rgba(127,224,255,0.7)';
+    ctx.fillText('定制模式 · 按 C 自选海克斯', 12, WORLD.H - 26);
+  }
   ctx.fillStyle = 'rgba(160,200,255,0.7)'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
   ctx.fillText(`${fps} FPS`, WORLD.W - 12, WORLD.H - 8);
 }
@@ -653,8 +682,33 @@ function drawStartOverlay() {
   ctx.fillText('武器只管射击与换弹（弹匣 30）· R 换弹', WORLD.W / 2, WORLD.H / 2 + 2);
   ctx.fillText('技能由右侧宠物机器人自动释放 · 升级三选一 = 海克斯', WORLD.W / 2, WORLD.H / 2 + 26);
   ctx.fillText(`共 ${RUN.maxWave} 波 · 20 级 · 第 ${RUN.maxWave} 波收尾`, WORLD.W / 2, WORLD.H / 2 + 50);
-  ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 16px sans-serif';
-  ctx.fillText('点击屏幕开始', WORLD.W / 2, WORLD.H / 2 + 96);
+  // 两种模式（2026-11-02 用户要求）：正常 / 定制（自选海克斯，用于测 build）
+  const b1 = startButtons();
+  for (const b of b1) {
+    const on = (b.mode === 'custom') === !!selectCustom;
+    ctx.fillStyle = on ? 'rgba(90,169,255,0.22)' : 'rgba(255,255,255,0.06)';
+    roundRect(b.x, b.y, b.w, b.h, 8); ctx.fill();
+    ctx.strokeStyle = on ? '#5aa9ff' : 'rgba(160,190,240,0.35)';
+    ctx.lineWidth = on ? 2 : 1;
+    roundRect(b.x, b.y, b.w, b.h, 8); ctx.stroke();
+    ctx.fillStyle = on ? '#cfe3ff' : '#aeb9d0';
+    ctx.font = 'bold 15px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(b.label, b.x + b.w / 2, b.y + 22);
+    ctx.font = '10px sans-serif'; ctx.fillStyle = 'rgba(174,185,208,0.8)';
+    ctx.fillText(b.sub, b.x + b.w / 2, b.y + 38);
+  }
+  ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText(selectCustom ? '点击「定制模式」开始 → 游戏中按 C 自选海克斯' : '点击「标准模式」开始', WORLD.W / 2, WORLD.H / 2 + 150);
+}
+
+// 开始界面的两个模式按钮
+function startButtons() {
+  const w = 176, h = 50, gap = 14;
+  const y = WORLD.H / 2 + 66;
+  return [
+    { mode: 'normal', label: '标准模式', sub: '正常三选一 · 靠抽卡', x: WORLD.W / 2 - w - gap / 2, y, w, h },
+    { mode: 'custom', label: '定制模式', sub: '自选海克斯 · 测 build', x: WORLD.W / 2 + gap / 2, y, w, h },
+  ];
 }
 
 function drawGameOver() {
@@ -666,6 +720,108 @@ function drawGameOver() {
   ctx.fillText(`分数 ${world.score} · 击杀 ${world.killCount} · Lv ${world.level} · 第 ${world.wave} 波`, WORLD.W / 2, WORLD.H / 2 + 6);
   ctx.fillStyle = '#7fe0ff'; ctx.font = 'bold 15px sans-serif';
   ctx.fillText('点击 / 回车 重新开始', WORLD.W / 2, WORLD.H / 2 + 48);
+  ctx.fillStyle = 'rgba(160,190,240,0.7)'; ctx.font = '11px sans-serif';
+  ctx.fillText(world.customMode ? '当前：定制模式（重开仍是定制）' : '当前：标准模式', WORLD.W / 2, WORLD.H / 2 + 74);
+}
+
+// ── 定制模式：卡池面板（自选海克斯，2026-11-02 用户要求）──
+// 存在的意义：正常模式只能靠随机三选一，想验证"分裂+爆炸"或"某个技能专精"到底怎样，
+// 得一局一局碰运气。这里给出面即用的自选面板，面板打开时战斗暂停，关掉继续。
+const PANEL = { x: 14, y: 44, w: WORLD.W - 28, h: 700 };
+const PANEL_TABS = [
+  { id: 'learn', label: '学习' },
+  { id: 'weapon', label: '武器' },
+  { id: 'skill', label: '技能' },
+  { id: 'bonus', label: '加成' },
+];
+
+function panelList() {
+  if (panelTab === 'learn') return LEARN_CARDS;
+  return CARDS.filter((c) => c.kind === panelTab);
+}
+
+function panelTabRects() {
+  const w = (PANEL.w - 24) / PANEL_TABS.length - 6;
+  return PANEL_TABS.map((t, i) => ({
+    tab: t, x: PANEL.x + 12 + i * (w + 6), y: PANEL.y + 46, w, h: 26,
+  }));
+}
+
+function panelCardRects() {
+  const list = panelList();
+  const cw = (PANEL.w - 24 - 8) / 2, ch = 46, gy = 6;
+  return list.map((c, i) => ({
+    card: c,
+    x: PANEL.x + 12 + (i % 2) * (cw + 8),
+    y: PANEL.y + 84 + Math.floor(i / 2) * (ch + gy),
+    w: cw, h: ch,
+  }));
+}
+
+function handlePanelClick(p) {
+  for (const t of panelTabRects()) if (insideRect(t, p)) { panelTab = t.tab.id; return; }
+  for (const r of panelCardRects()) {
+    if (!insideRect(r, p)) continue;
+    takeCard(world, r.card);
+    return;
+  }
+}
+
+// 按实测宽度截断（中文按字数截断会溢出卡片，必须量宽度）
+function fitText(text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text;
+  let s = text;
+  while (s.length > 1 && ctx.measureText(s + '…').width > maxW) s = s.slice(0, -1);
+  return s + '…';
+}
+
+function drawCardPanel() {
+  ctx.fillStyle = 'rgba(3,6,14,0.86)'; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
+  ctx.fillStyle = '#101a2e';
+  ctx.strokeStyle = 'rgba(120,170,255,0.35)'; ctx.lineWidth = 1;
+  roundRect(PANEL.x, PANEL.y, PANEL.w, PANEL.h, 12); ctx.fill(); ctx.stroke();
+
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 15px sans-serif';
+  ctx.fillText('定制模式 · 自选海克斯', PANEL.x + 12, PANEL.y + 24);
+  ctx.fillStyle = 'rgba(160,190,240,0.75)'; ctx.font = '10px sans-serif';
+  ctx.fillText('点卡片立即获得 · C 关闭（战斗已暂停）', PANEL.x + 12, PANEL.y + 38);
+
+  for (const t of panelTabRects()) {
+    const on = t.tab.id === panelTab;
+    ctx.fillStyle = on ? 'rgba(90,169,255,0.25)' : 'rgba(255,255,255,0.05)';
+    roundRect(t.x, t.y, t.w, t.h, 6); ctx.fill();
+    ctx.fillStyle = on ? '#cfe3ff' : '#8b97ad';
+    ctx.font = on ? 'bold 12px sans-serif' : '12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(t.tab.label, t.x + t.w / 2, t.y + 17);
+  }
+
+  for (const r of panelCardRects()) {
+    const c = r.card;
+    const stacks = world.cardStacks[c.id] || 0;
+    const learned = c.kind === 'learn' && !!world.skills[c.target];
+    const maxed = learned || (c.once && stacks >= 1) || (c.maxStacks && stacks >= c.maxStacks);
+    ctx.fillStyle = maxed ? 'rgba(255,255,255,0.04)'
+      : (c.kind === 'skill' ? 'rgba(90,169,255,0.10)' : 'rgba(255,255,255,0.07)');
+    roundRect(r.x, r.y, r.w, r.h, 6); ctx.fill();
+    ctx.strokeStyle = maxed ? 'rgba(120,140,170,0.22)' : 'rgba(140,180,240,0.30)';
+    ctx.lineWidth = 1; roundRect(r.x, r.y, r.w, r.h, 6); ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.fillStyle = maxed ? 'rgba(190,200,215,0.45)' : '#e7eefc';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillText(fitText(c.name, r.w - 42), r.x + 7, r.y + 15);
+    ctx.fillStyle = maxed ? 'rgba(170,180,200,0.35)' : 'rgba(180,200,230,0.78)';
+    ctx.font = '9px sans-serif';
+    ctx.fillText(fitText(c.text, r.w - 14), r.x + 7, r.y + 29);
+    if (stacks > 0 || learned) {
+      ctx.textAlign = 'right';
+      ctx.fillStyle = maxed ? 'rgba(150,165,185,0.6)' : '#7fe0ff';
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillText(learned ? '已学' : `×${stacks}`, r.x + r.w - 7, r.y + 15);
+    }
+  }
 }
 
 requestAnimationFrame(frame);

@@ -23,11 +23,23 @@ python3 -m http.server 8123      # 然后打开 http://localhost:8123
 自测与平衡模拟（纯 Node，不需要浏览器）：
 
 ```bash
-node src/demo/combat-core.test.mjs    # 战斗内核单测（当前 109 条）
+node src/demo/combat-core.test.mjs    # 战斗内核单测（当前 138 条）
 node src/demo/balance-sim.mjs         # 无头 20 波模拟：smart 专精流 vs random 随机流
 node src/demo/balance-sim.mjs --supply  # 额外打印每波经验供给表（校 XP 曲线用）
 node src/demo/balance-sim.mjs --runs=100 # 放大样本做正式校准（默认 12 局只够冒烟）
 ```
+
+## 操作
+
+| 操作 | 说明 |
+|---|---|
+| 自动瞄准 | 子弹自动锁最近的敌人，不用点屏幕 |
+| `R` | 手动换弹（弹匣 30） |
+| `1` ~ `4` | 释放技能（槽位 = 学习顺序，第 1 个学会的占第 1 槽） |
+| `Space` / `Enter` | 暂停 / 重开 |
+| **`C`** | **定制模式**下打开卡池面板，自选海克斯（面板打开时战斗暂停） |
+
+开始界面有两个模式按钮：**标准模式**（正常随机三选一）与**定制模式**（升级不弹随机卡，按 `C` 自己挑，用来现场搭一套 build 验证手感——比如"分裂 + 爆炸 + 子子弹爆炸"）。
 
 ## 目录结构
 

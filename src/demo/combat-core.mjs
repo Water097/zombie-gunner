@@ -105,7 +105,7 @@ export const SKILLS = {
     name: '装甲车', key: '4', color: '#6b8f4e',
     cooldownMs: 17400,
     dmg: 17,            // 单段冲撞伤害（02 册基础值）
-    speed: 210,         // 行进速度 px/s（420 → 210：用户 2026-11-02 要求"调低一倍"）
+    speed: 168,         // 行进速度 px/s（420 → 210 → 168：2026-11-02 两次下调，第二次再慢 20%）
     bodyW: 34,          // 车身宽（= 模型的宽，判定用）
     bodyH: 52,          // 车身高
     bodyHeavyW: 52,     // 重型装甲车（⑥ 质变卡）：模型与判定一起放大
@@ -115,7 +115,7 @@ export const SKILLS = {
     slowMag: 0.3,       // 减速幅度 30%
     slowMs: 2000,       // 基础减速时长（③ 卡 +4s）
     laneOffset: 62,     // 多车同场时的横向间隔
-    lifeMs: 5200,       // 存在时间上限（防止卡在场上）；速度减半后等比例延长，保证行进总距离不变（原 420×2.6s ≈ 1092px → 210×5.2s）
+    lifeMs: 6500,       // 存在时间上限（防止卡在场上）；每次降速都等比例延长，保证行进总距离不变（原 420×2.6s ≈ 1092px → 168×6.5s）
   },
 };
 
@@ -135,7 +135,7 @@ export const BULLET_TRAITS = {
   splitMax: 4,
   subDmgRatio: 0.20,    // 子子弹 = 20% 主伤（"子子弹伤害 +30%" 卡把它抬到 26%）
   subRange: 90,         // 子子弹射程 90px
-  subConeDeg: 30,       // ±30° 锥角
+  subConeDeg: 30,       // ⚠️ 已作废（2026-11-02 用户改为四周任意方向，360°）；保留仅为对照 06 册原设计
   subSpeed: 520,        // 子子弹飞行速度 px/s
   subExplodeDmgRatio: 0.30, // 子子弹爆炸：30% × 子伤（即 6% 主伤）
   subExplodeR: 25,      //   半径 25px
@@ -220,6 +220,11 @@ export function createWorld() {
     won: false,
     pendingCards: [],
     cardPhase: false,
+    // ── 测试用定制模式（2026-11-02 用户要求）──
+    // true 时开局即允许按 C 打开卡池面板自选海克斯（不受等级/槽位限制），
+    // 用于验证"某个 build 在实战里到底怎样"；正常模式下这两个字段都是 false。
+    customMode: false,
+    panelOpen: false,    // 面板打开 → 战斗暂停（见 update 早退）
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
     slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0, vehicle: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
     bonusTaken: 0,       // 已拿加成卡数（08 册软上限：按等级分层解锁）
@@ -272,9 +277,13 @@ function spawnEnemy(world, typeKey) {
   // ── 波次缩放（压迫感核心旋钮）：血量/速度/攻击随波次成长，玩家输出必须跟上海克斯选择质量 ──
   const wv = world.wave;
   // 血量超线性：前期温和、第 10 波起陡增——混搭乱选的 DPS 跟不上，专精+放大器才行
-  const hpScale = 1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45;  // 第20波 ≈ 2.8×
+  // 2026-11-02「加大密集程度」的配套：出怪数提升约 1.6 倍后，若单体照旧会把总压力乘成 1.7 倍，
+  // 游戏直接从"偶尔翻车"变"地狱"。这里把单体血量/攻击同比例下调（**更多但更软**），
+  // 保留尸群的密集观感与压迫感，但总压力只微增。
+  const DENSITY_COMP = 0.72;
+  const hpScale = (1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45) * DENSITY_COMP;  // 第20波 ≈ 2.0×
   const spdScale = Math.min(1.5, 1 + (wv - 1) * 0.025);
-  const atkScale = 1 + (wv - 1) * 0.06;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
+  const atkScale = (1 + (wv - 1) * 0.06) * DENSITY_COMP;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
   world.enemies.push({
     id: _idSeq++,
     type: typeKey,
@@ -376,9 +385,36 @@ function gainXp(world, amount) {
   }
   if (world.level > world.lastCardLevel) {
     world.lastCardLevel = world.level;
+    // 定制模式：不弹随机三选一，改成玩家自己按 C 打开面板挑（否则"自选"会被随机卡打断）
+    if (world.customMode) return;
     world.pendingCards = rollCards(world);
     world.cardPhase = true;   // 暂停战斗，等玩家选卡（级联只弹一次）
   }
+}
+
+// 定制模式专用：直接给一张卡（不消耗三选一、不看等级与槽位），用来现场搭一套 build 做测试。
+// 与 chooseCard 的区别：不要求 cardPhase、不弹选卡、不受卡池规则限制；
+// 但仍然遵守"一次性卡不重复 / 有层数上限的到顶为止 / 已学技能不重复学"这类硬约束，
+// 否则会把状态写成非法值（比如 doubleShot 到 4 层）。
+export function takeCard(world, card) {
+  if (!card || world.gameOver) return false;
+  const stacks = world.cardStacks[card.id] || 0;
+  if (card.kind === 'learn') {
+    if (world.skills[card.target]) return false;
+    world.skills[card.target] = { cd: 0 };
+  } else if (card.id === MERCY_CARD.id) {
+    if (world.mercyUsed) return false;
+    world.mercyUsed = true;
+    world.fortressHp = Math.min(world.fortressMaxHp, world.fortressHp + world.fortressMaxHp * 0.3);
+  } else {
+    if (card.once && stacks >= 1) return false;
+    if (card.maxStacks && stacks >= card.maxStacks) return false;
+    card.apply(world.mods);
+    if (card.kind === 'bonus') world.bonusTaken += 1;
+  }
+  world.cardStacks[card.id] = stacks + 1;
+  if (card.target && world.slotLevels[card.target] !== undefined) world.slotLevels[card.target] += 1;
+  return true;
 }
 
 export function chooseCard(world, idx) {
@@ -458,7 +494,7 @@ function fire(world, target) {
   const perBullet = PLAYER.baseDamage * m.bulletDamage * pelletFactor(m.spreadLanes) * pelletFactor(m.doubleShot);
   const lanes = 1 + m.spreadLanes;          // 散射：扇面铺开
   const SPREAD_STEP = 0.07;                 // 相邻弹道间隔 ≈4°
-  const BURST_GAP = 24;                     // 连发：沿射向前后错开约 2 帧位移（700px/s × 16ms ≈ 11px）
+  const BURST_GAP = 41;                     // 连发：沿射向前后错开（24 → 41，用户 2026-11-02 要求间距 +70%）；700px/s × 16ms ≈ 11px/帧
   for (let lane = 0; lane < lanes; lane++) {
     const laneAng = ang + (lane - (lanes - 1) / 2) * SPREAD_STEP;
     for (let d = 0; d < 1 + m.doubleShot; d++) { // 连发：同一条射线上前后排开
@@ -708,11 +744,11 @@ function blast(world, x, y, dmg, r, color) {
 function spawnSubBullets(world, b, x, y) {
   const m = world.mods, T = BULLET_TRAITS;
   const n = T.splitMin + Math.floor(Math.random() * (T.splitMax - T.splitMin + 1));
-  const base = Math.atan2(b.vy, b.vx);
-  const cone = (T.subConeDeg * Math.PI) / 180;
+  // 2026-11-02 用户要求：子子弹朝**四周任意方向**飞（不再限制在主弹方向的 ±30° 锥角内）
+  const FULL_CIRCLE = Math.PI * 2;
   const dmg = b.damage * T.subDmgRatio * m.subDmgMul;
   for (let i = 0; i < n; i++) {
-    const ang = base + (Math.random() * 2 - 1) * cone;
+    const ang = Math.random() * FULL_CIRCLE;
     // 进 pending 队列而不是直接 push：正在 for..of 遍历 world.bullets，直接 push 会让新子弹同帧被处理
     world.pendingBullets.push({
       x, y,
@@ -792,6 +828,7 @@ function explodeSkill(world, s) {
 export function update(world, dtMs) {
   if (world.gameOver || !world.running) return;
   if (world.cardPhase) return; // 选卡时战斗暂停
+  if (world.panelOpen) return;  // 定制模式卡池面板打开时同样暂停
   world.time += dtMs;
   const p = world.player;
   const m = world.mods;
@@ -801,10 +838,12 @@ export function update(world, dtMs) {
   const timeUp = world.time > RUN.maxWave * RUN.waveMs;
   world.spawnTimer -= dtMs;
   if (!timeUp && world.spawnTimer <= 0) {
-    // 出怪密度随波次抬升：基础 1~2 只，第 8 波起有概率三连出
-    const batch = 1 + (Math.random() < 0.3 ? 1 : 0) + (world.wave >= 8 && Math.random() < 0.25 ? 1 : 0);
+    // 出怪密度随波次抬升（2026-11-02 用户要求"加大密集程度"）：
+    // 基础批量 1→2 只（原来要 30% 概率才多一只，现在常态就是 2），第 8 波起有概率三连；
+    // 出怪间隔收紧约 6%（960-26w/max400 → 920-25w/max380）；实测一次加太猛会把 random 流打到 1/12
+    const batch = 2 + (Math.random() < 0.3 ? 1 : 0);
     for (let i = 0; i < batch; i++) spawnEnemy(world, pickEnemyType(world));
-    const speedUp = Math.max(400, 960 - world.wave * 26);
+    const speedUp = Math.max(380, 920 - world.wave * 25);
     world.spawnTimer = speedUp;
     if (world.time > world.wave * RUN.waveMs) world.wave += 1;
   }

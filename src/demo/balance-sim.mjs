@@ -24,19 +24,20 @@ const RUNS_PER_STRATEGY = (() => {
 // smart：专精流——武器伤害为主轴，专注冰系一条线（干冰弹→极寒延长→制冷回路→破冰），
 //        有对应放大器就吃。代表"正确选择海克斯"的玩家。
 const SMART_PRIORITY = [
+  'learn-freeze',                        // 先学一个技能：没有 AOE 的纯子弹 build 在密集尸群下必死
+  'learn-burn',                          // 第二个技能：密度加大后单线专精清群不够，会玩的人会补 AOE
   'bullet-dmg', 'bullet-dmg',           // 伤害主轴（允许重复优先）
-  'bullet-spread', 'bullet-double',     // 弹道卡（06册）：清群核心，正确玩家必拿
+  'bullet-spread', 'bullet-double',     // 弹道卡（06册）：清群核心
   'bullet-split',                        // 子弹属性卡（06册 §3.2.1）：分裂先立，修饰卡才有意义
   'bullet-explode',                      // 爆炸弹头：命中点 AOE
+  'icebreak',                            // 放大器直接跟线
   'bullet-sub-boom', 'bullet-sub-dmg',   // 子子弹修饰（要有分裂才进池，排后面）
   'bullet-explode-range',
-  'bullet-fire',                         // 火：单体 DoT，最弱的一档常驻
-  'learn-freeze',                        // 专精冰系
-  'icebreak',                            // 放大器直接跟线
   'freeze-dur', 'freeze-cd',
+  'bullet-fire',                         // 火：单体 DoT，最弱的一档常驻
   'bullet-rate', 'bullet-pierce',
   'combust', 'conductor',                 // 其他放大器（拿了也不亏）
-  'burn-dmg', 'shock-dur', 'burn-radius', 'freeze-cd',
+  'burn-dmg', 'shock-dur', 'burn-radius',
   'highpressure', 'rapidlearn', 'lightweight',
 ];
 function pickSmart(world) {
