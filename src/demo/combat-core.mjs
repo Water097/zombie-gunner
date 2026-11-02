@@ -143,7 +143,7 @@ export function createWorld() {
     pendingCards: [],
     cardPhase: false,
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
-    slotLevels: { weapon: 0, freeze: 0, burn: 0, shock: 0 }, // 各槽累计吃了几张卡（右上角显示）
+    slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
     bonusTaken: 0,       // 已拿加成卡数（08 册软上限：按等级分层解锁）
     petFlash: 0,         // 宠物机器人释放技能时的闪光
     mercyArmed: false,   // 要塞血量首次跌破 50% → 下一抽出现「要塞急救」

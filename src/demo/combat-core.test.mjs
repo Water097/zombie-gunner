@@ -218,11 +218,12 @@ console.log('— 弹匣固定 30（不随卡变化）—');
 console.log('— 选卡后对应槽累计加成次数（右上角要显示）—');
 {
   const w = createWorld(); w.running = true;
+  ok('武器初始等级 1（角色开局即 1 级）', w.slotLevels.weapon === 1);
   const card = CARDS.find((c) => c.id === 'bullet-dmg');
   ok('武器卡存在且 target 为 weapon', !!card && card.target === 'weapon');
   w.pendingCards = [card]; w.cardPhase = true;
   chooseCard(w, 0);
-  ok('武器槽计数 +1', w.slotLevels.weapon === 1);
+  ok('武器槽计数 +1（1→2）', w.slotLevels.weapon === 2);
   const sk = CARDS.find((c) => c.id === 'freeze-cd');
   w.pendingCards = [sk]; w.cardPhase = true;
   chooseCard(w, 0);
