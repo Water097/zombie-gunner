@@ -59,7 +59,10 @@ export const CARDS = [
     apply: (m) => { m.fireRate += 0.25; } },
   // ── 弹道卡（06册3.2.0）：独立乘数不进%桶。只扣 1 tick、弹耗不变；
   //    N=(1+弹道)×(1+连发) 乘法；每颗弹丸伤害按降伤表衰减（每类型上限 3 层）──
-  { id: 'bullet-spread', kind: 'weapon', target: 'weapon', name: '分裂子弹', text: '【子弹】弹道 +1（横向散射）', maxStacks: 3,
+  // 命名纪律（2026-11-02 澄清）：弹道 +1 是「散射」（横向铺开、落在不同线），
+  // 「分裂子弹」在 06 册 §3.2.1 #4 里专指"命中后分裂出 2-4 颗子子弹"，是另一张卡（Demo 未实装）。
+  // 曾有歧义：本卡原名"分裂子弹"但效果是弹道 +1，已改名避免与真分裂卡撞车。
+  { id: 'bullet-spread', kind: 'weapon', target: 'weapon', name: '散射弹道', text: '【子弹】弹道 +1（横向铺开，覆盖面更宽）', maxStacks: 3,
     apply: (m) => { m.spreadLanes = Math.min(3, m.spreadLanes + 1); } },
   { id: 'bullet-double', kind: 'weapon', target: 'weapon', name: '连发', text: '【子弹】连发 +1（同向多一颗）', maxStacks: 3,
     apply: (m) => { m.doubleShot = Math.min(3, m.doubleShot + 1); } },

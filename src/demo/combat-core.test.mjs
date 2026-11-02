@@ -316,7 +316,7 @@ console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
   ok('弹头改良仍为白给 +60%', bulletDmg.text.includes('+60%'));
 }
 
-console.log('— 弹道经济（06册3.2.0）：分裂子弹/连发，乘法叠加 + 降伤表 —');
+console.log('— 弹道经济（06册3.2.0）：散射弹道/连发，乘法叠加 + 降伤表 —');
 {
   const w = createWorld(); w.running = true;
   w.enemies.push(makeEnemyEntity('zombie', 225, 300));
@@ -324,7 +324,7 @@ console.log('— 弹道经济（06册3.2.0）：分裂子弹/连发，乘法叠�
   const dbl = CARDS.find((c) => c.id === 'bullet-double');
   spread.apply(w.mods);
   update(w, 16); // 开一枪
-  ok('分裂子弹：一次射击 2 颗（扇面散射）', w.bullets.length === 2);
+  ok('散射弹道：一次射击 2 颗（扇面铺开）', w.bullets.length === 2);
   ok('只扣 1 tick（弹药 -1 不 -2）', w.player.ammo === PLAYER.magSize - 1);
   ok('每颗弹丸降伤 ×0.65', w.bullets[0].damage === PLAYER.baseDamage * 0.65);
 }
@@ -335,6 +335,21 @@ console.log('— 弹道经济（06册3.2.0）：分裂子弹/连发，乘法叠�
   update(w, 16);
   ok('连发：一次射击 2 颗（同向）', w.bullets.length === 2 && w.player.ammo === PLAYER.magSize - 1);
   ok('连发每颗降伤 ×0.65', w.bullets[0].damage === PLAYER.baseDamage * 0.65);
+  // 回归（2026-11-02 实测反馈「选了连发子弹没多一颗」）：同向多发若都在同一点出生会完全重叠，
+  // 肉眼只看到一颗。方向必须严格一致，但出生点要沿射向前后错开。
+  const angs = new Set(w.bullets.map((b) => Math.atan2(b.vy, b.vx).toFixed(6)));
+  const dists = w.bullets.map((b) => Math.round(Math.hypot(b.x - w.player.x, b.y - w.player.y)));
+  ok('连发子弹方向严格一致（同向同落点）', angs.size === 1);
+  ok('连发子弹沿射向错开（否则视觉上只有一颗）', new Set(dists).size === w.bullets.length);
+}
+{
+  // 贴脸：错开幅度自动收窄，避免后面的子弹出生在目标背后（否则白少一发伤害）
+  const w = createWorld(); w.running = true;
+  w.enemies.push(makeEnemyEntity('zombie', w.player.x, w.player.y - 45));
+  CARDS.find((c) => c.id === 'bullet-double').apply(w.mods);
+  update(w, 16);
+  const d = w.bullets.map((b) => Math.round(Math.hypot(b.x - w.player.x, b.y - w.player.y))).sort((a, b) => a - b);
+  ok('贴脸时连发间距自动收窄（不越过目标）', d.length === 2 && d[1] - d[0] < 24);
 }
 {
   const m = createWorld().mods;

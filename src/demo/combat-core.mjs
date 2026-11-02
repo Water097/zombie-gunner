@@ -426,12 +426,18 @@ function fire(world, target) {
   const perBullet = PLAYER.baseDamage * m.bulletDamage * pelletFactor(m.spreadLanes) * pelletFactor(m.doubleShot);
   const lanes = 1 + m.spreadLanes;          // 散射：扇面铺开
   const SPREAD_STEP = 0.07;                 // 相邻弹道间隔 ≈4°
+  const BURST_GAP = 24;                     // 连发：沿射向前后错开约 2 帧位移（700px/s × 16ms ≈ 11px）
   for (let lane = 0; lane < lanes; lane++) {
     const laneAng = ang + (lane - (lanes - 1) / 2) * SPREAD_STEP;
-    for (let d = 0; d < 1 + m.doubleShot; d++) { // 连发：同向同落点
+    for (let d = 0; d < 1 + m.doubleShot; d++) { // 连发：同一条射线上前后排开
+      // 同向多发若都在同一点出生会完全重叠，肉眼看起来只有一颗 → 沿射向错开，
+      // 方向仍严格一致（同向同落点），只是出膛位置前后拉开，伤害与命中逻辑不变。
+      // 上限不超过到目标的距离，避免贴脸时后面的子弹"越过"目标少打一发。
+      const aimDist = Math.hypot(target.x - p.x, target.y - p.y);
+      const spawn = Math.min(28 + d * BURST_GAP, Math.max(20, aimDist - 6));
       world.bullets.push({
-        x: p.x + Math.cos(laneAng) * 28,
-        y: p.y + Math.sin(laneAng) * 28,
+        x: p.x + Math.cos(laneAng) * spawn,
+        y: p.y + Math.sin(laneAng) * spawn,
         vx: Math.cos(laneAng) * PLAYER.bulletSpeed,
         vy: Math.sin(laneAng) * PLAYER.bulletSpeed,
         damage: perBullet,
@@ -439,6 +445,7 @@ function fire(world, target) {
         radius: PLAYER.bulletRadius,
         pierceLeft: pierce,   // 穿透：可连续命中 pierce 个敌人
         hitIds: [],           // 同一敌人不重复结算
+        burstIdx: d,          // 连发序号（0=首发），渲染层用来画拖尾衔接
       });
     }
   }
