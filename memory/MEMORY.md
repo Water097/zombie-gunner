@@ -1,6 +1,7 @@
 # 要塞射击(zombie-gunner) 项目记忆（续作连续性摘要）
 
-> 跨机接手的权威入口是仓库内 `docs/16-进度与交接.md`（本文件不进 git）。
+> 本文件镜像到仓库 `memory/`（随 git 走）；换机器 clone 后跑 `node scripts/memory-sync.mjs --pull` 即还原到本地记忆目录。
+> 人读的交接入口：`docs/16-进度与交接.md`（现状/怎么跑/待办），本文件记的是决策与坑。
 
 ## 一、坐标
 - 本地：`E:/Documents/WorkBuddy/zombie-gunner/`（独立仓库，从 personal-site 分离）
