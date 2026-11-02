@@ -224,26 +224,41 @@ function pickEnemyType(world) {
   return 'zombie';
 }
 
-// 伤害结算：唯一入口。装甲车×冻结硬门禁在此生效。
+// 伤害结算：唯一入口。装甲车×冻结硬门禁 + 条件增伤在此生效。
+// 放大器触发时飘字带标注（破冰/助燃/导电/交叉）并按方向配色——让"加成真的在生效"看得见。
 function dealDamage(world, enemy, raw, source = 'weapon') {
-  const mult = enemy.vehicleLevel ? vehicleRammedMultiplier(enemy.st, enemy.vehicleLevel) : 1;
-  const dmg = raw * mult;
+  const cond = conditionMultiplier(world, enemy);
+  const gate = enemy.vehicleLevel ? vehicleRammedMultiplier(enemy.st, enemy.vehicleLevel) : 1;
+  const dmg = raw * cond.mult * gate;
   enemy.hp -= dmg;
   enemy.hitFlash = 90;
-  if (mult > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×${mult}  ${Math.round(dmg)}`, '#ff4d4d');
+  if (gate > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×3  ${Math.round(dmg)}`, '#ff4d4d');
+  else if (cond.tag) addFloater(world, enemy.x, enemy.y - enemy.radius, `${cond.tag} ${Math.round(dmg)}`, cond.color);
   else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : '#ffffff');
   if (enemy.hp <= 0) killEnemy(world, enemy);
 }
 
 // 条件增伤（08 册 A 类放大器：每张只奖励一种配合，带主语）
+// 返回 { mult, tag, color }：tag/color 用于飘字标注，把"这次伤害为什么变高"显示出来
+const AMPLIFIERS = [
+  { test: (st) => has(st, 'freeze'), get: (m) => m.dmgVsFrozen, tag: '破冰', color: '#5ad1ff' },
+  { test: (st) => has(st, 'burn'), get: (m) => m.dmgVsBurn, tag: '助燃', color: '#ff9a3c' },
+  { test: (st) => has(st, 'shock'), get: (m) => m.dmgVsShock, tag: '导电', color: '#ffe14d' },
+];
 function conditionMultiplier(world, enemy) {
   const st = enemy.st, m = world.mods;
-  let d = 1;
-  if (has(st, 'freeze')) d *= m.dmgVsFrozen;
-  if (has(st, 'burn')) d *= m.dmgVsBurn;
-  if (has(st, 'shock')) d *= m.dmgVsShock;
-  if (m.crossfire > 1 && world.enemies.length >= 8) d *= m.crossfire;
-  return d;
+  let d = 1, tag = null, color = null;
+  for (const a of AMPLIFIERS) {
+    if (a.test(st) && a.get(m) > 1) {
+      d *= a.get(m);
+      if (!tag) { tag = a.tag; color = a.color; }
+    }
+  }
+  if (m.crossfire > 1 && world.enemies.length >= 8) {
+    d *= m.crossfire;
+    if (!tag) { tag = '交叉'; color = '#ff6b6b'; }
+  }
+  return { mult: d, tag, color };
 }
 
 function killEnemy(world, enemy, scored = true) {
@@ -466,7 +481,16 @@ export function update(world, dtMs) {
   for (const e of world.enemies) {
     if (!e.alive) continue;
     const dot = tick(e.st, dtMs); // burn DoT 在此结算；同时推进 _now 供冻结 DR
-    if (dot > 0) { e.hp -= dot; if (e.hp <= 0) { killEnemy(world, e); continue; } }
+    if (dot > 0) {
+      // DoT 走统一伤害入口（放大器/飘字生效）；按 ~0.5s 聚合跳字，避免每帧刷屏
+      e.dotAcc = (e.dotAcc || 0) + dot;
+      if (e.dotAcc >= 9) {
+        const acc = e.dotAcc;
+        e.dotAcc = 0;
+        dealDamage(world, e, acc, 'burn');
+        if (!e.alive) continue;
+      }
+    }
     if (e.hitFlash > 0) e.hitFlash -= dtMs;
     if (e.attackFlash > 0) e.attackFlash -= dtMs;
 
@@ -507,7 +531,7 @@ export function update(world, dtMs) {
       if (b.hitIds.includes(e.id)) continue;
       const rr = (e.radius + b.radius);
       if (dist2(b.x, b.y, e.x, e.y) <= rr * rr) {
-        dealDamage(world, e, b.damage * conditionMultiplier(world, e), 'weapon');
+        dealDamage(world, e, b.damage, 'weapon');
         b.hitIds.push(e.id);
         b.pierceLeft -= 1;
         for (let i = 0; i < 4; i++) {

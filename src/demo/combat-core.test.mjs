@@ -314,5 +314,34 @@ console.log('— 海克斯池方案四：软衰减 + 硬保底（同方向单次
   ok('武器偏科 10 级后仍偶见武器卡（软衰减 ≠ 归零）', weaponOnly === 0 && nonWeaponEveryRoll === n);
 }
 
+console.log('— 感知层：放大器飘字标注 + DoT 走统一伤害入口 —');
+{
+  const w = createWorld(); w.running = true;
+  const e = makeEnemyEntity('zombie', 225, 300);
+  w.enemies.push(e);
+  apply(e.st, 'freeze', 1, 2500, { sourceId: 'test', sourceLevel: 1, displaceType: 'normal' });
+  w.mods.dmgVsFrozen = 1.3; // 破冰
+  w.floaters.length = 0;
+  for (let i = 0; i < 60 && w.floaters.length === 0; i++) update(w, 16); // 等子弹飞到
+  const tags = w.floaters.map((f) => f.text);
+  ok('放大器触发：飘字带「破冰」标注', tags.some((t) => String(t).includes('破冰')));
+  const ice = w.floaters.find((f) => String(f.text).includes('破冰'));
+  ok('破冰飘字为冰蓝色（#5ad1ff）', ice && ice.color === '#5ad1ff');
+}
+{
+  // DoT 聚合跳字：灼烧敌人跑 1 秒，应出现橙色伤害飘字（原实现完全静默）
+  const w = createWorld(); w.running = true;
+  const e = makeEnemyEntity('zombie', 225, 300);
+  e.hp = 200; e.maxHp = 200;
+  w.enemies.push(e);
+  apply(e.st, 'burn', 18, 3000, { sourceId: 'test', sourceLevel: 1, displaceType: 'normal' });
+  muteSkills(w);
+  w.floaters.length = 0;
+  for (let i = 0; i < 62; i++) update(w, 16); // ~1 秒
+  const burnFloaters = w.floaters.filter((f) => f.color === '#ff9a3c');
+  ok('灼烧 DoT 跳伤害字（原实现静默不可见）', burnFloaters.length >= 1);
+  ok('DoT 实际扣血', e.hp < 200 || !e.alive);
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);

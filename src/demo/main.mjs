@@ -429,7 +429,7 @@ function drawSkillSlots() {
     ctx.beginPath(); ctx.arc(c.cx, c.cy, c.r, 0, Math.PI * 2); ctx.stroke();
     ctx.fillStyle = sk.color; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(sk.name[0], c.cx, c.cy + 6);
-    // 冷却遮罩（自顶向下扫过）
+    // 冷却遮罩（自顶向下扫过）+ 剩余秒数（冷却卡"看得见"的关键）
     const full = sk.cooldownMs * world.mods.skillCdMul[c.id];
     if (slot.cd > 0) {
       const frac = Math.min(1, slot.cd / full);
@@ -438,6 +438,8 @@ function drawSkillSlots() {
       ctx.moveTo(c.cx, c.cy);
       ctx.arc(c.cx, c.cy, c.r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * frac);
       ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#eaf2ff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText((slot.cd / 1000).toFixed(1), c.cx, c.cy + 18);
     }
     // 右下角等级角标（对齐参考原图）
     const lv = world.slotLevels[c.id] || 0;
