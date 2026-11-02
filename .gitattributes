@@ -2,3 +2,4 @@
 # 导致 memory/ 镜像在跨机比对时出现"整文件逐行不同"的假差异。
 # 这些文件只由 scripts/memory-sync.mjs 读写，固定 LF 才能保证跨机一致。
 memory/**/*.md text eol=lf
+.gitattributes text eol=lf
