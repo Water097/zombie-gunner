@@ -275,5 +275,22 @@ console.log('— 海克斯定价与经验曲线（2026-11-02 调整）—');
   ok('弹头改良仍为白给 +60%', bulletDmg.text.includes('+60%'));
 }
 
+console.log('— 技能槽位 = 学习先后顺序（不是写死的技能→槽位映射）—');
+{
+  const w = createWorld(); w.running = true;
+  w.cardPhase = true;
+  w.pendingCards = [{ kind: 'learn', target: 'shock', id: 'learn-shock' }, { kind: 'learn', target: 'shock', id: 'learn-shock' }, { kind: 'learn', target: 'shock', id: 'learn-shock' }];
+  ok('先学电磁 → 电磁占第 1 槽', chooseCard(w, 0) === true && Object.keys(w.skills)[0] === 'shock');
+  w.cardPhase = true;
+  w.pendingCards = [{ kind: 'learn', target: 'burn', id: 'learn-burn' }, { kind: 'learn', target: 'burn', id: 'learn-burn' }, { kind: 'learn', target: 'burn', id: 'learn-burn' }];
+  chooseCard(w, 0);
+  w.cardPhase = true;
+  w.pendingCards = [{ kind: 'learn', target: 'freeze', id: 'learn-freeze' }, { kind: 'learn', target: 'freeze', id: 'learn-freeze' }, { kind: 'learn', target: 'freeze', id: 'learn-freeze' }];
+  chooseCard(w, 0);
+  const order = Object.keys(w.skills);
+  ok('学习顺序 = 槽位顺序：电→温→冰', order.join(',') === 'shock,burn,freeze');
+  ok('后学的技能只往后追加，不插队', order[2] === 'freeze');
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);

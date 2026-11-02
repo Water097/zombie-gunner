@@ -32,19 +32,20 @@ const SKILL_CX = WORLD.W - 29;      // 圆心：右缘留 11
 const SKILL_TOP = 110;              // 第一个圆心（卡底 78 + 间隙 14 + 半径 18）
 const SKILL_STEP = 44;              // 间距（直径 36 + 间隙 8）
 const SKILL_SLOTS = 4;              // 技能槽共 4 个：未学/未满也显示占位框
-const SKILL_ORDER = ['freeze', 'burn', 'shock']; // 槽位固定顺序（肌肉记忆稳定）
 const PET = { w: 31, h: 22 };
 const HP_BAR = { w: 298, h: 9, y: 750 };
 
 function weaponCardRect() {
   return { x: WORLD.W - CARD.right - CARD.w, y: CARD.y, w: CARD.w, h: CARD.h };
 }
-// 技能槽：固定 4 个，按 SKILL_ORDER 排列；未学的显示空占位框
+// 技能槽：固定 4 个。已学技能按【学习先后顺序】从上往下排（world.skills 是普通对象，
+// 键的插入顺序 = 学习顺序）；未学的显示空占位框，排在学习槽之后。
 function skillSlots() {
+  const learned = Object.keys(world.skills); // 学习顺序
   const slots = [];
   for (let i = 0; i < SKILL_SLOTS; i++) {
-    const id = SKILL_ORDER[i] || null;
-    slots.push({ id, learned: id ? !!world.skills[id] : false, cx: SKILL_CX, cy: SKILL_TOP + i * SKILL_STEP, r: SKILL_R });
+    const id = learned[i] || null;
+    slots.push({ id, learned: !!id, cx: SKILL_CX, cy: SKILL_TOP + i * SKILL_STEP, r: SKILL_R });
   }
   return slots;
 }
@@ -67,10 +68,10 @@ window.addEventListener('keydown', (e) => {
   if (e.key === 'r' || e.key === 'R') { manualReload(world); return; }
   // 选卡时 1/2/3 = 选第几张（界面不显示序号，键盘仍可用）
   if (world.cardPhase && ['1', '2', '3', '4'].includes(e.key)) { chooseCard(world, Number(e.key) - 1); return; }
-  // 已学技能：数字键按槽位释放（1/2/3 对应固定槽位）
+  // 已学技能：数字键按槽位释放（槽位 = 学习顺序，1 = 最先学的技能）
   const idx = Number(e.key) - 1;
-  const slotId = SKILL_ORDER[idx];
-  if (slotId && world.skills[slotId]) castSkill(world, slotId);
+  const slot = skillSlots()[idx];
+  if (slot && slot.learned) castSkill(world, slot.id);
 });
 
 function canvasToLogical(clientX, clientY) {
