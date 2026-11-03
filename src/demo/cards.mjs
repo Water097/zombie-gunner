@@ -137,7 +137,8 @@ export const CARDS = [
     apply: (m) => { m.vehicleVuln = 1; } },
   { id: 'vehicle-knock', kind: 'skill', target: 'vehicle', name: '冲压装甲', text: '【装甲车】击退 +75%，10% 概率眩晕 1 秒',
     apply: (m) => { m.vehicleKnockMul += 0.75; m.vehicleStunChance += 0.1; } },
-  { id: 'vehicle-heavy', kind: 'skill', target: 'vehicle', name: '重型装甲车', once: true, text: '【装甲车】冲撞范围 +80%，伤害 +50%',
+  // 2026-11-03 改：不再给范围（范围属性过强）→ 只放大模型，伤害 +80% 换行进 -20%
+  { id: 'vehicle-heavy', kind: 'skill', target: 'vehicle', name: '重型装甲车', once: true, text: '【装甲车】车身放大，伤害 +80%，行进 -20%（碾压范围不变）',
     apply: (m) => { m.vehicleHeavy = 1; } },
   // 局外节点卡（对应 12 / 15 / 18 / 20 级，02 册 2.3）：一次性，拿过不再进池
   { id: 'vehicle-tar', kind: 'skill', target: 'vehicle', name: '粘性焦油', once: true, text: '【装甲车】撞击追加目标最大生命 3% 伤害',

@@ -24,6 +24,13 @@ function makeEnemyEntity(typeKey, x, y) {
 function makeBullet(x, y, opts = {}) {
   return { x, y, vx: 0, vy: 0, damage: PLAYER.baseDamage, life: 200, radius: PLAYER.bulletRadius, pierceLeft: 1, hitIds: [], ...opts };
 }
+// 装甲车出发车道是随机的（2026-11-03）：先叫车，再把测试敌人挪到那辆车的车道上
+function castVehicleOnLane(w, ...enemies) {
+  const okCast = castSkill(w, 'vehicle');
+  const v = w.vehicles[w.vehicles.length - 1];
+  if (v) for (const e of enemies) e.x = v.x;
+  return okCast;
+}
 // 屏蔽已学技能的自动释放，隔离被测机制
 function muteSkills(w) { for (const k of Object.keys(w.skills)) w.skills[k].cd = 1e9; }
 // 学会一个技能（开局默认一个技能都没有，必须先学）
@@ -537,7 +544,7 @@ console.log('— 装甲车：出场 / 多段冲撞 / 击退 / 减速 —');
   e.speed = 0; // 隔离自身推进：3 秒窗口内只观察"载具把敌人推回"，不掺入敌人自己往要塞走
   w.enemies.push(e);
 
-  ok('施放成功', castSkill(w, 'vehicle') === true);
+  ok('施放成功', castVehicleOnLane(w, e) === true);
   ok('生成 1 辆载具', w.vehicles.length === 1);
   ok('施放后进入冷却', w.skills.vehicle.cd > 0);
 
@@ -601,7 +608,7 @@ console.log('— 装甲车：20 级「冰冻碾碎」碾过冻结单位 ×3 —'
     e.id = 301; e.hp = 9999; e.maxHp = 9999;
     apply(e.st, 'freeze', 1, 99999, { sourceId: 'test', sourceLevel: 1, displaceType: 'normal' });
     w.enemies.push(e);
-    castSkill(w, 'vehicle');
+    castVehicleOnLane(w, e);
     let first = null, last = e.hp;
     for (let i = 0; i < 130 && first === null; i++) {
       update(w, 16);
@@ -624,7 +631,7 @@ console.log('— 装甲车：④ 易伤 / ⑤ 眩晕 —');
     const e = makeEnemyEntity('zombie', 225, 500);
     e.id = 401; e.hp = 9999; e.maxHp = 9999;
     w.enemies.push(e);
-    castSkill(w, 'vehicle');
+    castVehicleOnLane(w, e);
     const drops = [];
     let last = e.hp;
     for (let i = 0; i < 130; i++) {
@@ -642,7 +649,7 @@ console.log('— 装甲车：④ 易伤 / ⑤ 眩晕 —');
     const e = makeEnemyEntity('zombie', 225, 500);
     e.id = 402; e.hp = 9999; e.maxHp = 9999;
     w.enemies.push(e);
-    castSkill(w, 'vehicle');
+    castVehicleOnLane(w, e);
     const orig = Math.random;
     let everStunned = false; // 眩晕只 1s，窗口末已过期，故记录"曾经进入过"
     Math.random = () => 0; // 强制命中眩晕判定
@@ -756,7 +763,8 @@ console.log('— 子弹属性卡（06 册 §3.2.1）：火 / 爆炸 / 分裂 —
     const subs = w.bullets.filter((b) => b.isSub);
     ok('分裂：产生 2-4 颗子子弹', subs.length >= 2 && subs.length <= 4);
     ok('分裂：子子弹 = 20% 主伤', Math.abs(subs[0].damage - 20) < 1e-9);
-    ok('分裂：子子弹独立 90px 射程（≈173ms）', Math.abs(subs[0].life - (90 / 520) * 1000) < 1);
+    ok('分裂：子子弹是小号真子弹（同主子弹速度与寿命，不再限 90px）',
+      subs[0].life === 1400 && Math.abs(Math.hypot(subs[0].vx, subs[0].vy) - PLAYER.bulletSpeed) < 1e-6);
   }
   // ⑥ 子子弹伤害 +30%：20% → 26%
   {
@@ -833,6 +841,56 @@ console.log('— 定制模式（自选海克斯，测试 build 用）—');
   const spread = CARDS.find((c) => c.id === 'bullet-spread');
   for (let i = 0; i < 5; i++) takeCard(w4, spread);
   ok('takeCard 仍遵守 3 层上限', w4.mods.spreadLanes === 3 && w4.cardStacks['bullet-spread'] === 3);
+}
+
+console.log('— 装甲车：随机车道 / 随机发车间隔 / 重型不换范围（2026-11-03）—');
+{
+  const stopFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
+  // 多车车道随机：多次施放取样，应出现明显不同的 x
+  {
+    const xs = new Set();
+    for (let k = 0; k < 20; k++) {
+      const w = createWorld(); w.running = true;
+      learnSkill(w, 'vehicle'); stopFire(w);
+      w.mods.vehicleCount = 2;
+      castSkill(w, 'vehicle');
+      xs.add(Math.round(w.vehicles[0].x));
+    }
+    ok('多车不再固定横排（车道随机）', xs.size > 3);
+  }
+  // 发车间隔：递增但非固定值
+  {
+    const w = createWorld(); w.running = true;
+    learnSkill(w, 'vehicle'); stopFire(w);
+    w.mods.vehicleCount = 2;
+    castSkill(w, 'vehicle');
+    const ramps = w.vehicles.map((v) => v.ramp);
+    ok('发车间隔递增且不是固定 200ms', ramps[0] === 0 && ramps[1] > 0 && ramps[1] !== 200);
+  }
+  // 重型：只放大模型、不换范围；速度 ×0.8
+  {
+    const w = createWorld(); w.running = true;
+    learnSkill(w, 'vehicle'); stopFire(w);
+    w.mods.vehicleHeavy = 1;
+    castSkill(w, 'vehicle');
+    const v = w.vehicles[0];
+    ok('重型：判定仍是 34×52（范围不放大）', v.w === SKILLS.vehicle.bodyW && v.h === SKILLS.vehicle.bodyH);
+    ok('重型：模型放大到 52×78（只是看着大）', v.visW === 52 && v.visH === 78);
+    ok('重型：行进速度 ×0.8', Math.abs(Math.abs(v.vy) - SKILLS.vehicle.speed * 0.8) < 1e-6);
+  }
+  // 重型伤害 ×1.8（对付代价）
+  {
+    const w = createWorld(); w.running = true;
+    learnSkill(w, 'vehicle'); stopFire(w);
+    w.mods.vehicleHeavy = 1;
+    const e = makeEnemyEntity('zombie', 225, 500);
+    e.id = 801; e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e);
+    castVehicleOnLane(w, e);
+    w.vehicles[0].y = 480; // 直接把车挪到目标上方一个身位（省掉 30 帧车程，且不越过防线）
+    update(w, 16);
+    ok('重型：单段伤害 17×1.8 = 30.6', Math.round((9999 - e.hp) * 100) / 100 === 30.6);
+  }
 }
 
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);

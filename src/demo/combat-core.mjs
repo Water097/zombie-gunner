@@ -106,10 +106,11 @@ export const SKILLS = {
     cooldownMs: 17400,
     dmg: 17,            // 单段冲撞伤害（02 册基础值）
     speed: 168,         // 行进速度 px/s（420 → 210 → 168：2026-11-02 两次下调，第二次再慢 20%）
-    bodyW: 34,          // 车身宽（= 模型的宽，判定用）
+    bodyW: 34,          // 车身宽（判定用，重型也不变——范围属性极强，不给）
     bodyH: 52,          // 车身高
-    bodyHeavyW: 52,     // 重型装甲车（⑥ 质变卡）：模型与判定一起放大
-    bodyHeavyH: 78,
+    visHeavyW: 52,      // 重型装甲车（⑥ 质变卡）：**只放大模型**，判定仍是 bodyW/bodyH
+    visHeavyH: 78,
+    heavySpeedMul: 0.8, // 重型减速 20%（代价），伤害在 vehicleHit 里 ×1.8（收益）
     hitIntervalMs: 100, // 多段伤害间隔
     knock: 25,          // 撞击击退距离（守线杠杆，每车每目标只结算一次）
     slowMag: 0.3,       // 减速幅度 30%
@@ -628,22 +629,27 @@ const META_VEHICLE = { sourceId: 'skill-vehicle', sourceLevel: 1, displaceType: 
 function castVehicle(world) {
   const m = world.mods, sk = SKILLS.vehicle;
   const count = 1 + Math.round(m.vehicleCount);
-  const baseX = world.player.x;
-  const half = (count - 1) / 2;
   const heavy = !!m.vehicleHeavy;
-  const w = heavy ? sk.bodyHeavyW : sk.bodyW;
-  const h = heavy ? sk.bodyHeavyH : sk.bodyH;
+  // 判定几何永远是普通车身（2026-11-03：重型只放大模型，**不放大攻击范围**）
+  const w = sk.bodyW;
+  const h = sk.bodyH;
+  const visW = heavy ? sk.visHeavyW : sk.bodyW;
+  const visH = heavy ? sk.visHeavyH : sk.bodyH;
+  let rampAcc = 0;
   for (let i = 0; i < count; i++) {
-    // 多车时横向铺开但不出屏（半辆车身也算出屏，按半宽夹住）
-    const x = Math.max(w * 0.5, Math.min(WORLD.W - w * 0.5, baseX + (i - half) * sk.laneOffset));
+    // 2026-11-03 用户要求：多车不再横排等距出发，改为**随机车道 + 随机发车间隔**
+    const x = Math.max(visW * 0.5, Math.min(WORLD.W - visW * 0.5, visW * 0.5 + Math.random() * (WORLD.W - visW)));
+    if (i > 0) rampAcc += 140 + Math.random() * 380; // 相邻两车 140~520ms，不挨着出发
     world.vehicles.push({
       x,
       y: world.player.y + 30,
       w,
       h,
-      vy: -sk.speed,
-      life: sk.lifeMs,
-      ramp: i * 200,       // 依次出场，避免多车挤成一堵墙
+      visW,
+      visH,
+      vy: -sk.speed * (heavy ? sk.heavySpeedMul : 1),
+      life: sk.lifeMs / (heavy ? sk.heavySpeedMul : 1), // 降速后同步延长存在时间，保证走完全程
+      ramp: rampAcc,       // 随机发车间隔
       hitCd: new Map(),    // enemyId → 剩余冷却（多段伤害节流）
       knocked: new Set(),  // 已被这辆车推过的目标（击退每车每目标只结算一次）
       firstHit: false,     // 局外 18 级「冲撞爆破」每车只炸一次
@@ -657,7 +663,7 @@ function castVehicle(world) {
 // 单段冲撞：伤害 → 击退 → 减速 → 易伤 → 眩晕 → 首撞爆破
 function vehicleHit(world, v, e) {
   const m = world.mods, sk = SKILLS.vehicle;
-  let dmg = sk.dmg * m.vehicleDmgMul * (v.heavy ? 1.5 : 1);
+  let dmg = sk.dmg * m.vehicleDmgMul * (v.heavy ? 1.8 : 1); // 重型：伤害 ×1.8（不换范围）
   // 局外 20 级：碾过【冻结】单位 +200%——复用 14 册硬门禁接口，
   // 只读 has('freeze')，不关心冰冻是谁挂的（跨技能联动成立的技术原因，见 02 册 6.2）
   dmg *= vehicleRammedMultiplier(e.st, m.vehicleLevel);
@@ -747,16 +753,18 @@ function spawnSubBullets(world, b, x, y) {
   // 2026-11-02 用户要求：子子弹朝**四周任意方向**飞（不再限制在主弹方向的 ±30° 锥角内）
   const FULL_CIRCLE = Math.PI * 2;
   const dmg = b.damage * T.subDmgRatio * m.subDmgMul;
+  // 2026-11-03 用户要求：子子弹就是"减伤 + 体积变小"的真子弹，**不再限制 90px 射程**，
+  // 速度与存活时间都跟主子弹一致，能一路飞到屏幕外（越界由统一的 offscreen 判定回收）。
   for (let i = 0; i < n; i++) {
     const ang = Math.random() * FULL_CIRCLE;
     // 进 pending 队列而不是直接 push：正在 for..of 遍历 world.bullets，直接 push 会让新子弹同帧被处理
     world.pendingBullets.push({
       x, y,
-      vx: Math.cos(ang) * T.subSpeed,
-      vy: Math.sin(ang) * T.subSpeed,
+      vx: Math.cos(ang) * PLAYER.bulletSpeed,
+      vy: Math.sin(ang) * PLAYER.bulletSpeed,
       damage: dmg,
-      life: (T.subRange / T.subSpeed) * 1000,  // 90px 射程 → 约 173ms
-      radius: 3,
+      life: 1400,          // 同主子弹寿命（≈980px 射程，基本飞满全屏）
+      radius: 3,           // 形态比主子弹小（减伤版的"小弹"）
       pierceLeft: 1,
       hitIds: [],
       isSub: true,

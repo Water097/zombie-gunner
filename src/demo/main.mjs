@@ -27,6 +27,7 @@ let fps = 60, fpsAccum = 0, fpsFrames = 0;
 // 定制模式（2026-11-02）：开始界面选模式，游戏中按 C 打开卡池面板自选海克斯
 let selectCustom = false;   // 开始界面当前高亮的模式
 let panelTab = 'learn';     // 面板当前分类
+let panelSub = 'freeze';    // 技能页的子分类（按技能分开，否则 21 张技能卡挤在一起）
 
 // ── 右侧 UI（换算自参考原图）──
 // 武器卡贴在经验条正下方（参考原图：经验条往下一格就是武器卡），技能圆竖排其下、互不重叠
@@ -339,16 +340,16 @@ function drawVehicles() {
   for (const v of world.vehicles) {
     if (v.ramp > 0) continue; // 还没进场
     const a = Math.min(1, v.life / 400);
-    // 判定框 = 车身本身（2026-11-02 用户要求：不再是车身外一圈，所以不画外圈光晕）
-    const w = v.w, h = v.h;
+    // 模型尺寸（重型放大）与碾压判定框分开：2026-11-03 起重型只放大模型，判定不放大
+    const w = v.visW || v.w, h = v.visH || v.h;
     const x = v.x - w / 2, y = v.y - h / 2;
     ctx.globalAlpha = 0.14 * a;
     ctx.fillStyle = v.color;
     roundRect(x, y, w, h, 6); ctx.fill();
-    // 碾压判定描边（玩家能一眼看出"压到哪算碾"）
+    // 碾压判定描边（用真实判定尺寸 v.w × v.h，重型车比模型小一圈——玩家能看出"范围没变"）
     ctx.globalAlpha = 0.55 * a;
     ctx.strokeStyle = '#e9c46a'; ctx.lineWidth = 1.2;
-    roundRect(x, y, w, h, 6); ctx.stroke();
+    roundRect(v.x - v.w / 2, v.y - v.h / 2, v.w, v.h, 4); ctx.stroke();
     // 尾尘（车后拖一条扬尘）
     ctx.globalAlpha = 0.22 * a;
     ctx.fillStyle = '#c9c2a8';
@@ -735,9 +736,25 @@ const PANEL_TABS = [
   { id: 'bonus', label: '加成' },
 ];
 
+// 技能页再按技能分子页（2026-11-03 用户要求：一堆技能卡混在一起不好找）
+const PANEL_SUBS = [
+  { id: 'freeze', label: '干冰' },
+  { id: 'burn', label: '温压' },
+  { id: 'shock', label: '电磁' },
+  { id: 'vehicle', label: '装甲车' },
+];
+
 function panelList() {
   if (panelTab === 'learn') return LEARN_CARDS;
+  if (panelTab === 'skill') return CARDS.filter((c) => c.kind === 'skill' && c.target === panelSub);
   return CARDS.filter((c) => c.kind === panelTab);
+}
+
+function panelSubRects() {
+  const w = (PANEL.w - 24) / 4 - 6;
+  return PANEL_SUBS.map((t, i) => ({
+    sub: t, x: PANEL.x + 12 + i * (w + 6), y: PANEL.y + 78, w, h: 24,
+  }));
 }
 
 function panelTabRects() {
@@ -750,16 +767,20 @@ function panelTabRects() {
 function panelCardRects() {
   const list = panelList();
   const cw = (PANEL.w - 24 - 8) / 2, ch = 46, gy = 6;
+  const y0 = PANEL.y + (panelTab === 'skill' ? 114 : 84); // 技能页多一行子 tab
   return list.map((c, i) => ({
     card: c,
     x: PANEL.x + 12 + (i % 2) * (cw + 8),
-    y: PANEL.y + 84 + Math.floor(i / 2) * (ch + gy),
+    y: y0 + Math.floor(i / 2) * (ch + gy),
     w: cw, h: ch,
   }));
 }
 
 function handlePanelClick(p) {
   for (const t of panelTabRects()) if (insideRect(t, p)) { panelTab = t.tab.id; return; }
+  if (panelTab === 'skill') {
+    for (const t of panelSubRects()) if (insideRect(t, p)) { panelSub = t.sub.id; return; }
+  }
   for (const r of panelCardRects()) {
     if (!insideRect(r, p)) continue;
     takeCard(world, r.card);
@@ -797,6 +818,23 @@ function drawCardPanel() {
     ctx.fillText(t.tab.label, t.x + t.w / 2, t.y + 17);
   }
 
+  if (panelTab === 'skill') {
+    for (const t of panelSubRects()) {
+      const on = t.sub.id === panelSub;
+      ctx.fillStyle = on ? 'rgba(127,224,255,0.18)' : 'rgba(255,255,255,0.04)';
+      roundRect(t.x, t.y, t.w, t.h, 5); ctx.fill();
+      ctx.fillStyle = on ? '#7fe0ff' : '#7b879e';
+      ctx.font = on ? 'bold 11px sans-serif' : '11px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(t.sub.label, t.x + t.w / 2, t.y + 16);
+      // 每页张数（方便判断还有多少没拿）
+      const n = CARDS.filter((c) => c.kind === 'skill' && c.target === t.sub.id).length;
+      ctx.textAlign = 'right';
+      ctx.font = '8px sans-serif';
+      ctx.fillStyle = 'rgba(150,175,210,0.55)';
+      ctx.fillText(String(n), t.x + t.w - 4, t.y + 16);
+    }
+  }
   for (const r of panelCardRects()) {
     const c = r.card;
     const stacks = world.cardStacks[c.id] || 0;
