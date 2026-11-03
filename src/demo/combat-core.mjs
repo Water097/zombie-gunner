@@ -60,6 +60,43 @@ export const ENEMY_TYPES = {
   armored: { name: '装甲尸车', targetType: 'armored', hp: 300, speed: 10, radius: 24, color: '#577590', score: 200, xp: 40, atkDmg: 9, atkIntervalMs: 2000, vehicleLevel: 20 },
 };
 
+// ── 波次压力曲线（2026-11-03 实装，对齐 04 册 §三 职能表）──
+// 04 册那张 20 波职能表（起手/热身/引入/精英峰/上升/喘息×2/高压 16-18/清算/尸墙）一直没进 Demo，
+// 之前是匀速出怪 → 赢的局全程满血、零起伏。现在用现有 3 种敌人把它落成"密度峰谷 + 两次喘息"。
+// 设计纪律（04 册 §七）：以密度为主、血量为辅；逐波显式系数，不套公式。
+//   composition：zombie/runner/armored 权重（不需归一化，轮盘赌自动归一）
+//   batch：本批出怪只数；extraChance：本批额外 +1 只的概率（制造疏密抖动）
+//   interval：出怪间隔(ms)；name：职能标签（未来波次预告 UI 用）；breath：喘息波标记
+// 单体成长（hpScale/spdScale/atkScale，见 spawnEnemy）仍随波次连续抬升（"更多但更软"方向不变），
+// 此处只塑密度骨架——密度峰谷 + 两次落潮，把"差点没守住"的紧张感做出来。
+export const WAVE_SCRIPT = [
+  { name: '起手',     composition: { zombie: 1.00, runner: 0.00, armored: 0.00 }, batch: 1, extraChance: 0.00, interval: 1100, breath: false }, // 1  教学：最稀，看清枪在打什么
+  { name: '热身',     composition: { zombie: 0.75, runner: 0.25, armored: 0.00 }, batch: 2, extraChance: 0.00, interval: 1000, breath: false }, // 2  密度缓升，出现快速兵
+  { name: '热身',     composition: { zombie: 0.65, runner: 0.35, armored: 0.00 }, batch: 2, extraChance: 0.20, interval: 950,  breath: false }, // 3  前 2-3 次升级，Build 有雏形
+  { name: '引入·装甲',composition: { zombie: 0.55, runner: 0.33, armored: 0.12 }, batch: 2, extraChance: 0.20, interval: 900,  breath: false }, // 4  第一次"防线会被突破"实感
+  { name: '精英峰',   composition: { zombie: 0.45, runner: 0.35, armored: 0.20 }, batch: 3, extraChance: 0.30, interval: 850,  breath: false }, // 5  第一个压力峰（密度略高于旧版同期）
+  { name: '上升',     composition: { zombie: 0.50, runner: 0.40, armored: 0.10 }, batch: 2, extraChance: 0.20, interval: 880,  breath: false }, // 6  密度爬坡
+  { name: '上升',     composition: { zombie: 0.43, runner: 0.45, armored: 0.12 }, batch: 3, extraChance: 0.30, interval: 820,  breath: false }, // 7  建立"越来越挤"预期
+  { name: '喘息',     composition: { zombie: 0.65, runner: 0.30, armored: 0.05 }, batch: 1, extraChance: 0.20, interval: 1200, breath: true  }, // 8  密度骤降（≈基线一半），让玩家松一口气
+  { name: '引入·装甲流',composition: { zombie: 0.40, runner: 0.40, armored: 0.20 }, batch: 3, extraChance: 0.30, interval: 820,  breath: false }, // 9  装甲比例抬升
+  { name: '精英峰',   composition: { zombie: 0.32, runner: 0.40, armored: 0.28 }, batch: 3, extraChance: 0.40, interval: 750,  breath: false }, // 10 中段大考
+  { name: '上升',     composition: { zombie: 0.33, runner: 0.42, armored: 0.25 }, batch: 3, extraChance: 0.40, interval: 760,  breath: false }, // 11 密度继续爬
+  { name: '上升',     composition: { zombie: 0.27, runner: 0.45, armored: 0.28 }, batch: 3, extraChance: 0.40, interval: 740,  breath: false }, // 12
+  { name: '上升',     composition: { zombie: 0.22, runner: 0.48, armored: 0.30 }, batch: 3, extraChance: 0.35, interval: 740,  breath: false }, // 13
+  { name: '喘息',     composition: { zombie: 0.50, runner: 0.40, armored: 0.10 }, batch: 2, extraChance: 0.20, interval: 1150, breath: true  }, // 14 第二次呼吸
+  { name: '精英峰',   composition: { zombie: 0.20, runner: 0.45, armored: 0.35 }, batch: 3, extraChance: 0.40, interval: 720,  breath: false }, // 15 终局前最后一道坎（略高于旧版同期）
+  { name: '高压',     composition: { zombie: 0.15, runner: 0.50, armored: 0.35 }, batch: 3, extraChance: 0.40, interval: 720,  breath: false }, // 16 满屏压力，密度回到旧版同期水平
+  { name: '高压',     composition: { zombie: 0.12, runner: 0.50, armored: 0.38 }, batch: 3, extraChance: 0.40, interval: 700,  breath: false }, // 17
+  { name: '高压',     composition: { zombie: 0.08, runner: 0.52, armored: 0.40 }, batch: 3, extraChance: 0.40, interval: 680,  breath: false }, // 18
+  { name: '清算',     composition: { zombie: 0.08, runner: 0.50, armored: 0.42 }, batch: 3, extraChance: 0.50, interval: 660,  breath: false }, // 19 全类型 + 高密度，爽感释放
+  { name: '尸墙',     composition: { zombie: 0.05, runner: 0.50, armored: 0.45 }, batch: 3, extraChance: 0.50, interval: 640,  breath: false }, // 20 最高密度收尾（≈旧版峰值，制造"撑住"感）
+];
+
+// 整体密度微调旋钮（不影响峰谷相对形状，只把所有波的间隔等比例缩放）：
+// 1.0 = 剧本原值；>1 降低整体密度（拉回可玩基线）。当前 1.2：装甲车等守线技能实装后机制已 drift，
+// 16 册基线（smart 87%/random 77%）是旧代码测的，现版需整体降一档才能回到可玩区间。
+const SPAWN_INTERVAL_TUNE = 1.2;
+
 // ── 三技能（9 技能里的代表：冰弹穿透 / 温压爆炸 / 电磁天雷）──
 // 对齐 02 册：每个技能是"独立攻击体系"，不是要塞静态光环。
 // 设计形态（2026-11-02 用户重定电磁）：温压=点→圆（落点爆炸）／干冰=点→小圆（穿透弹）／
@@ -253,6 +290,8 @@ export function createWorld() {
     fortressFlash: 0,
     spawnTimer: 700,
     wave: 1,
+    waveName: '起手',
+    waveBreath: false,
     score: 0,
     killCount: 0,
   };
@@ -319,11 +358,16 @@ function spawnEnemy(world, typeKey) {
   });
 }
 
-// 加权随机出怪：普通最多，装甲间隔出现
+// 加权随机出怪：读当前波的 composition（WAVE_SCRIPT），轮盘赌自动归一化。
+// 前 3 波的 composition 里 armored=0，自然实现"第 4 波才引入装甲"的节奏（04 册 §三「引入」波）。
 function pickEnemyType(world) {
-  const r = Math.random();
-  if (world.wave >= 2 && r < 0.18) return 'armored';
-  if (r < 0.45) return 'runner';
+  const comp = (WAVE_SCRIPT[world.wave - 1] || WAVE_SCRIPT[WAVE_SCRIPT.length - 1]).composition;
+  const z = comp.zombie || 0, r = comp.runner || 0, a = comp.armored || 0;
+  const total = z + r + a;
+  if (total <= 0) return 'zombie';
+  let x = Math.random() * total;
+  if ((x -= a) < 0) return 'armored';   // 先判稀有（装甲）
+  if ((x -= r) < 0) return 'runner';
   return 'zombie';
 }
 
@@ -864,14 +908,22 @@ export function update(world, dtMs) {
   const timeUp = world.time > RUN.maxWave * RUN.waveMs;
   world.spawnTimer -= dtMs;
   if (!timeUp && world.spawnTimer <= 0) {
-    // 出怪密度随波次抬升（2026-11-02 用户要求"加大密集程度"）：
-    // 基础批量 1→2 只（原来要 30% 概率才多一只，现在常态就是 2），第 8 波起有概率三连；
-    // 出怪间隔收紧约 6%（960-26w/max400 → 920-25w/max380）；实测一次加太猛会把 random 流打到 1/12
-    const batch = 2 + (Math.random() < 0.3 ? 1 : 0);
+    // 波次压力曲线（2026-11-03）：出怪参数全部读 WAVE_SCRIPT 当前波，形成密度峰谷 + 两次喘息。
+    // 单体成长（hpScale 等）仍随波次连续抬升，见 spawnEnemy——这里只塑密度骨架。
+    const script = WAVE_SCRIPT[world.wave - 1] || WAVE_SCRIPT[WAVE_SCRIPT.length - 1];
+    world.waveName = script.name;
+    world.waveBreath = !!script.breath;
+    let batch = script.batch;
+    if (Math.random() < script.extraChance) batch += 1;
     for (let i = 0; i < batch; i++) spawnEnemy(world, pickEnemyType(world));
-    const speedUp = Math.max(380, 920 - world.wave * 25);
-    world.spawnTimer = speedUp;
-    if (world.time > world.wave * RUN.waveMs) world.wave += 1;
+    world.spawnTimer = script.interval * SPAWN_INTERVAL_TUNE;
+  }
+  // 波次推进：按时间（04 册"波间无停顿"，上一波超时即接下一波），封顶 20 波
+  if (!timeUp && world.time > world.wave * RUN.waveMs && world.wave < RUN.maxWave) {
+    world.wave += 1;
+    const next = WAVE_SCRIPT[world.wave - 1] || WAVE_SCRIPT[WAVE_SCRIPT.length - 1];
+    world.waveName = next.name;
+    world.waveBreath = !!next.breath;
   }
   if (timeUp && world.enemies.length === 0 && !world.gameOver) {
     world.won = true; world.gameOver = true; world.running = false;
