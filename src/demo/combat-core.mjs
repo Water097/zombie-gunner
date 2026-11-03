@@ -185,16 +185,16 @@ export const SKILLS = {
 
   // ── 五技能补齐（2026-11-03）：高能射线 / 制导激光 / 哨戒机 / 燃烧地带 / 旋转刀轮 ──
   // 形态与 02 册 3.1 空间占位一一对应；⚠️ 全部临时基准值，数值阶段统一校准。
-  // 高能射线（2026-11-03 用户反馈改形态）：原"逐 tick 多段小伤害"体验差（间隔小、宽度窄），
-  // 改为**瞬发大额直线伤害**：施放瞬间对沿线上所有敌人结算一次，光束只作表现残留。
+  // 高能射线：持续光束（逐 tick 多段伤害）。2026-11-03 用户澄清：要的就是"跳多段"，
+  // 曾短暂改为瞬发大伤害，按用户要求改回多段形态；海克斯扩容保留。
   ray: {
     name: '高能射线', key: '5', color: '#3fe0d0',
-    cooldownMs: 5000,
-    dmg: 90,            // 瞬间伤害（单次全额）
+    cooldownMs: 7500,
+    dmg: 18,            // 每 tick 伤害（0.2s 一跳，持续 1.6s ≈ 8 跳）
+    durMs: 1600,
+    tickMs: 200,
     len: 620,           // 光束长度
-    halfWidth: 14,      // 光束半宽（判定宽度 28px）
-    flashMs: 260,       // 纯表现：光束残留时长
-    echoDelayMs: 400,   // 「二次脉冲」卡：0.4s 后沿原路径再打一次（50% 伤害）
+    halfWidth: 10,      // 光束半宽（配合敌人半径判定）
   },
   // 制导激光：窄扇形左右扫射，逐 tick 命中扇面内敌人（对空/对散开队形覆盖）。
   laser: {
@@ -1018,7 +1018,7 @@ export function castSkill(world, id) {
   }
 
   // ── 五技能（2026-11-03 补齐）：均不走 skillShots，各自建实体 ──
-  // 高能射线（瞬发版）：施放瞬间对沿线上所有敌人结算一次，光束只作表现残留
+  // 高能射线：朝最近敌人的方向锁一道持续光束（逐 tick 多段伤害；无敌人则不空放、不耗冷却）
   if (id === 'ray') {
     const tgt = acquireTarget(world);
     if (!tgt) return false;
@@ -1026,7 +1026,7 @@ export function castSkill(world, id) {
     const baseAng = Math.atan2(tgt.y - pet.y, tgt.x - pet.x);
     const n = 1 + m.rayCount;
     for (let i = 0; i < n; i++) {
-      fireRayBeam(world, baseAng + (i - (n - 1) / 2) * 0.14);
+      pushRayBeam(world, baseAng + (i - (n - 1) / 2) * 0.14, false);
     }
     world.petFlash = 320;
     slot.cd = sk.cooldownMs * m.skillCdMul[id];
@@ -1143,30 +1143,17 @@ export function castSkill(world, id) {
   return true;
 }
 
-// 高能射线（瞬发版）：沿 ang 直线结算一次伤害 + 光束表现残留。
-// dmgRatio：二次脉冲复用（0.5）；echo 卡只挂在本体光束上。
-function fireRayBeam(world, ang, dmgRatio = 1) {
+// 高能射线：生成一道持续光束实体（逐 tick 伤害在 update 里结算，多段形态）。
+// isEcho：「二次射线」卡续射的那道光不再带 echo，防无限链。
+function pushRayBeam(world, ang, isEcho) {
   const sk = SKILLS.ray, m = world.mods;
-  const halfWidth = sk.halfWidth * m.rayWidthMul;
   const pet = petPos(world);
-  const dx = Math.cos(ang), dy = Math.sin(ang);
-  for (const e of world.enemies) {
-    if (!e.alive) continue;
-    const rx = e.x - pet.x, ry = e.y - pet.y;
-    const along = rx * dx + ry * dy;
-    if (along < 0 || along > sk.len) continue;
-    if (Math.abs(rx * -dy + ry * dx) > halfWidth + e.radius) continue;
-    dealDamage(world, e, sk.dmg * m.rayDmgMul * dmgRatio, 'ray');
-    if (!e.alive) continue;
-    if (m.raySlow) apply(e.st, 'slow', m.raySlow, 1500, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
-    if (m.rayVuln) apply(e.st, 'vuln', 0.25, 5000, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
-    if (m.rayKnock) apply(e.st, 'knock', m.rayKnock, 0, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
-  }
-  const withEcho = !!m.rayEcho && dmgRatio === 1;
-  const life = sk.flashMs + (withEcho ? sk.echoDelayMs + sk.flashMs : 0);
+  const life = sk.durMs;
   world.beams.push({
-    x: pet.x, y: pet.y, ang, len: sk.len, halfWidth, life, maxLife: life, color: sk.color,
-    echo: withEcho, echoTimer: withEcho ? sk.echoDelayMs : 0, echoDone: false,
+    x: pet.x, y: pet.y, ang,
+    len: sk.len, halfWidth: sk.halfWidth * m.rayWidthMul,
+    life, maxLife: life, tickTimer: 0, dmg: sk.dmg * m.rayDmgMul, color: sk.color,
+    echo: !!m.rayEcho && !isEcho, echoDone: false,
   });
 }
 
@@ -1405,13 +1392,32 @@ export function update(world, dtMs) {
   }
 
   // ── 五技能实体推进 / 结算（2026-11-03 补齐，统一走 dealDamage）──
-  // 高能射线（瞬发版）：光束只是表现残留；「二次脉冲」卡到点后沿原路径补一次 50% 伤害
-  for (const b of [...world.beams]) {
+  // 高能射线（多段形态）：逐 tick 命中沿光束线的敌人（点到线距离判定）+ 状态卡
+  for (const b of world.beams) {
     b.life -= dtMs;
-    if (b.echo && !b.echoDone) {
-      b.echoTimer -= dtMs;
-      if (b.echoTimer <= 0) { b.echoDone = true; fireRayBeam(world, b.ang, 0.5); }
+    b.tickTimer -= dtMs;
+    if (b.tickTimer <= 0) {
+      b.tickTimer = SKILLS.ray.tickMs;
+      const dx = Math.cos(b.ang), dy = Math.sin(b.ang);
+      for (const e of world.enemies) {
+        if (!e.alive) continue;
+        const rx = e.x - b.x, ry = e.y - b.y;
+        const along = rx * dx + ry * dy;
+        if (along < 0 || along > b.len) continue;
+        if (Math.abs(rx * -dy + ry * dx) > b.halfWidth + e.radius) continue;
+        dealDamage(world, e, b.dmg, 'ray');
+        if (!e.alive) continue;
+        if (m.raySlow) apply(e.st, 'slow', m.raySlow, 1500, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
+        if (m.rayVuln) apply(e.st, 'vuln', 0.25, 5000, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
+        if (m.rayKnock) apply(e.st, 'knock', m.rayKnock, 0, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
+      }
     }
+  }
+  // 「二次射线」卡：光束到期后立即再射一道（续射道光束不链式）
+  for (const b of world.beams) {
+    if (b.life > 0 || !b.echo || b.echoDone) continue;
+    b.echoDone = true;
+    pushRayBeam(world, b.ang, true);
   }
   world.beams = world.beams.filter((b) => b.life > 0);
 

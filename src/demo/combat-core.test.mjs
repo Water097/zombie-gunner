@@ -1090,15 +1090,23 @@ console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃
   // 通用隔离：屏蔽其它技能自动释放 + 关掉主武器 + 停止出怪
   const isolate = (w) => { muteSkills(w); w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; w.spawnTimer = 1e9; };
 
-  // 高能射线（瞬发版，2026-11-03 用户反馈改形态）：施放瞬间结算一次，光束只作表现
+  // 高能射线（多段形态，用户澄清"要的就是跳多段"）：逐 tick 伤害 + 二次射线续射
   {
     const w = createWorld(); w.running = true; isolate(w);
     const e = makeEnemyEntity('zombie', PLAYER.x, 300); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
     w.enemies.push(e); learnSkill(w, 'ray');
-    const hp0 = e.hp;
     const okCast = castSkill(w, 'ray');
-    ok('高能射线：施放瞬间对沿线敌人造成伤害（不再多段跳）', okCast && e.hp < hp0);
-    ok('高能射线：光束仅作表现残留', w.beams.length === 1);
+    ok('高能射线：施放生成 1 道光束', okCast && w.beams.length === 1);
+    const hp0 = e.hp; for (let i = 0; i < 5; i++) update(w, 16);
+    ok('高能射线：光束逐 tick 对沿线敌人造成多段伤害', e.hp < hp0);
+  }
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    const e = makeEnemyEntity('zombie', PLAYER.x, 300); e.hp = 999999; e.maxHp = 999999; e.speed = 0;
+    w.enemies.push(e); learnSkill(w, 'ray'); w.mods.rayEcho = 1;
+    castSkill(w, 'ray');
+    for (let i = 0; i < 110; i++) update(w, 16); // ≈1.76s：第一道光束到期 → 续射一道
+    ok('高能射线「二次射线」：光束到期后续射一道（续射不链式）', w.beams.length === 1 && w.beams[0].echo === false);
   }
   // 制导激光：窄扇面扫到敌人伤害
   {

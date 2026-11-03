@@ -213,7 +213,7 @@ export const CARDS = [
     apply: (m) => { m.rayVuln = 1; } },
   { id: 'ray-knock', kind: 'skill', target: 'ray', name: '冲击光束', once: true, text: '【高能射线】命中击退敌人（12 级节点）',
     apply: (m) => { m.rayKnock = 20; } },
-  { id: 'ray-echo', kind: 'skill', target: 'ray', name: '二次脉冲', once: true, text: '【高能射线】0.4 秒后沿原路径再打一次（50% 伤害，20 级节点）',
+  { id: 'ray-echo', kind: 'skill', target: 'ray', name: '二次射线', once: true, text: '【高能射线】光束结束后立即再射一道（20 级节点）',
     apply: (m) => { m.rayEcho = 1; } },
   // 制导激光 → 共 9 张
   { id: 'laser-width', kind: 'skill', target: 'laser', name: '宽域扇面', text: '【制导激光】扇面宽度 +50%', maxStacks: 2,
