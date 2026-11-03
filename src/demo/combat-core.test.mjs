@@ -18,7 +18,7 @@ function ok(name, cond) {
 }
 function makeEnemyEntity(typeKey, x, y) {
   const t = ENEMY_TYPES[typeKey];
-  return { id: 1, type: typeKey, ...t, x, y, hp: t.hp, maxHp: t.hp, st: makeEnemy(t.targetType), alive: true, hitFlash: 0, attacking: false, attackTimer: 0, attackFlash: 0, splitChild: false, standoffY: t.standoff ? Math.round(WORLD.H * t.standoffFrac) : 0 };
+  return { id: 1, type: typeKey, ...t, x, y, hp: t.hp, maxHp: t.hp, st: makeEnemy(t.targetType), alive: true, hitFlash: 0, attacking: false, attackTimer: 0, attackFlash: 0, splitChild: false, standoffY: t.standoff ? Math.round(FORTRESS.attackLine * (1 - t.standoffFrac)) : 0 };
 }
 // 供碰撞用的子弹（内核里子弹带穿透与命中去重，测试需同构）
 function makeBullet(x, y, opts = {}) {
@@ -1028,12 +1028,12 @@ console.log('— 远程兵：推进到 standoff 线停住并喷吐弹丸（不�
 {
   const w = createWorld(); w.running = true; muteSkills(w);
   w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; // 隔离主武器
-  const e = makeEnemyEntity('ranged', 225, ENEMY_TYPES.ranged.standoffFrac ? Math.round(WORLD.H * ENEMY_TYPES.ranged.standoffFrac) : 0);
+  const e = makeEnemyEntity('ranged', 225, 0); e.y = e.standoffY; // 直接置于新 standoff 线（speed=0 隔离推进）
   e.id = 1101; e.speed = 0;
   w.enemies.push(e);
   const hp0 = w.fortressHp;
   for (let i = 0; i < 320; i++) update(w, 16); // ≈5.1s：够首发射击 + 弹丸飞抵要塞
-  ok('远程兵停在 standoff 线（未冲到要塞线）', e.alive && e.y <= FORTRESS.attackLine - 100);
+  ok('远程兵 standoff 线在距防线 30% 处（约 y454，不再偏上）', e.alive && e.standoffY >= FORTRESS.attackLine - 220 && e.standoffY < FORTRESS.attackLine);
   ok('远程兵向要塞喷吐弹丸（生成 enemyShots）', w.enemyShots.length > 0 || w.fortressHp < hp0);
   ok('远程兵弹丸命中要塞造成伤害', w.fortressHp < hp0);
 }
@@ -1048,6 +1048,17 @@ console.log('— 自爆兵：抵线即爆，大额要塞伤害后消失 —');
   update(w, 16);
   ok('自爆兵抵线引爆并消失', !e.alive && !w.enemies.includes(e));
   ok('自爆对要塞造成大额伤害（boomDmg 随波缩放）', w.fortressHp <= hp0 - 20);
+}
+
+console.log('— 自爆兵回归：从上方移动逼近防线也会引爆（非直接生成在线上）—');
+{
+  const w = createWorld(); w.running = true; muteSkills(w);
+  w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; // 隔离主武器
+  const e = makeEnemyEntity('bomber', 225, FORTRESS.attackLine - 120);
+  e.id = 1202; e.hp = 9999; e.maxHp = 9999; e.speed = 400; // 逼近速度放大，快速跨线
+  w.enemies.push(e);
+  for (let i = 0; i < 60; i++) update(w, 16); // ≈1s：足够从上方跨过防线（真实场景，非直接生成在线上）
+  ok('自爆兵从上方逼近防线也会引爆并消失', !e.alive && !w.enemies.includes(e));
 }
 
 console.log('— 飞行兵：空中直线飞向要塞，抵达持续攻击 —');

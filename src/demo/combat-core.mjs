@@ -56,7 +56,7 @@ export function petPos(world) {
 // 新增 atkDmg / atkIntervalMs：抵达要塞后的攻击力与攻击频率
 // 行为标记（05 册八种＋蜂群）：
 //   swarm     蜂群：极小成片、横向铺开、数量即血条；死亡不产尸爆（锁死温压连锁反向超神）
-//   standoff  远程兵：推进到 standoffFrac·H 处停住，向要塞喷吐弹丸（不冲线）
+//   standoff  远程兵：推进到「距防线 standoffFrac 比例」处停住（用户 2026-11-03：距要塞 30%，即顶部→要塞 100% 中的下 70%），向要塞喷吐弹丸（不冲线）
 //   bomber    自爆兵：抵线即爆，造成大额要塞伤害后消失
 //   flyer     飞行兵：air=true，悬浮直线飞向要塞（Demo 内无地面阻挡，行为等同直线推进，仅渲染有翼）
 //   splitter  分裂兵：死亡裂成 2 只小兵，子代 splitChild=true 不再分裂（防递归）
@@ -66,7 +66,7 @@ export const ENEMY_TYPES = {
   armored: { name: '装甲尸车', targetType: 'armored', hp: 300, speed: 10, radius: 24, color: '#577590', score: 200, xp: 40, atkDmg: 9, atkIntervalMs: 2000, vehicleLevel: 20 },
   // ── 05 册八种：下列 5 种为 2026-11-03 补齐（数值阶段统一校准，当前为临时基准值）──
   swarm:   { name: '蜂群',     targetType: 'normal',  hp: 9,   speed: 34, radius: 5,  color: '#c9a83a', score: 8,   xp: 5,  atkDmg: 2,  atkIntervalMs: 1500, swarm: true, noCorpseBoom: true },
-  ranged:  { name: '远程尸',   targetType: 'normal',  hp: 35,  speed: 16, radius: 13, color: '#9d8ec4', score: 70,  xp: 14, atkDmg: 5,  atkIntervalMs: 1800, standoff: true, standoffFrac: 0.34 },
+  ranged:  { name: '远程尸',   targetType: 'normal',  hp: 35,  speed: 16, radius: 13, color: '#9d8ec4', score: 70,  xp: 14, atkDmg: 5,  atkIntervalMs: 1800, standoff: true, standoffFrac: 0.30 },
   bomber:  { name: '自爆尸',   targetType: 'normal',  hp: 30,  speed: 22, radius: 15, color: '#ff6b4a', score: 60,  xp: 10, atkDmg: 0,  atkIntervalMs: 0,    bomber: true, boomDmg: 40 },
   flyer:   { name: '飞行尸',   targetType: 'normal',  hp: 28,  speed: 24, radius: 12, color: '#8fd0e8', score: 55,  xp: 12, atkDmg: 3,  atkIntervalMs: 1400, flyer: true, air: true },
   splitter:{ name: '分裂尸',   targetType: 'normal',  hp: 70,  speed: 14, radius: 19, color: '#a8c66c', score: 90,  xp: 16, atkDmg: 4,  atkIntervalMs: 1500, splitter: true },
@@ -465,7 +465,7 @@ function makeEnemyEntity(world, typeKey, x, y, opts = {}) {
     attackTimer: 0,
     attackFlash: 0,
     splitChild: !!opts.splitChild,
-    standoffY: t.standoff ? Math.round(WORLD.H * t.standoffFrac) : 0,
+    standoffY: t.standoff ? Math.round(FORTRESS.attackLine * (1 - t.standoffFrac)) : 0,
   };
   if (t.bomber) e.boomDmgScaled = Math.round(t.boomDmg * atkScale); // 自爆兵抵线爆炸伤害随波次成长
   return e;
@@ -1281,20 +1281,15 @@ export function update(world, dtMs) {
       continue; // 攻击姿态下不再推进
     }
 
-    // 自爆兵：触及防线即引爆（不走持续攻击，见 bomberExplode）
-    if (e.bomber && e.y >= FORTRESS.attackLine) {
-      bomberExplode(world, e);
-      continue;
-    }
-
     const mult = movementMultiplier(e);
     e.y += e.speed * mult * (dtMs / 1000);
     // 击退（一次性，结算即清）
     const kd = getKnockDistance(e.st);
     if (kd > 0) { e.y = applyKnockToPosition(e.y, kd, -9999).y; clear(e.st, 'knock'); if (e.y < FORTRESS.attackLine) e.attacking = false; }
-    // 抵达线：地面兵到防线、远程兵到 standoff 线即转入攻击姿态
+    // 抵达线：地面兵到防线、远程兵到 standoff 线即转入攻击姿态；自爆兵抵线即引爆（绝不转为持续啃咬）
     const reached = e.standoff ? e.standoffY : FORTRESS.attackLine;
     if (e.y >= reached) {
+      if (e.bomber) { bomberExplode(world, e); continue; } // 自爆兵抵线引爆后消失（修复：原逻辑因 attacking 先置位，引爆分支永远轮不到 → 自爆兵永不爆）
       e.y = reached;
       e.attacking = true;
       e.attackTimer = e.atkIntervalMs * 0.5; // 抵达后半拍就出手
