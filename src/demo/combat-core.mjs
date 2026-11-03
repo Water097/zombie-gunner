@@ -185,15 +185,16 @@ export const SKILLS = {
 
   // ── 五技能补齐（2026-11-03）：高能射线 / 制导激光 / 哨戒机 / 燃烧地带 / 旋转刀轮 ──
   // 形态与 02 册 3.1 空间占位一一对应；⚠️ 全部临时基准值，数值阶段统一校准。
-  // 高能射线：竖直/斜向一道持续光束，方向在施放时锁定，逐 tick 命中沿线的敌人（不吃弹夹）。
+  // 高能射线（2026-11-03 用户反馈改形态）：原"逐 tick 多段小伤害"体验差（间隔小、宽度窄），
+  // 改为**瞬发大额直线伤害**：施放瞬间对沿线上所有敌人结算一次，光束只作表现残留。
   ray: {
     name: '高能射线', key: '5', color: '#3fe0d0',
-    cooldownMs: 7500,
-    dmg: 18,            // 每 tick 伤害（0.2s 一跳）
-    durMs: 1600,        // 持续 1.6s ≈ 8 跳
-    tickMs: 200,
+    cooldownMs: 5000,
+    dmg: 90,            // 瞬间伤害（单次全额）
     len: 620,           // 光束长度
-    halfWidth: 10,      // 光束半宽（配合敌人半径判定）
+    halfWidth: 14,      // 光束半宽（判定宽度 28px）
+    flashMs: 260,       // 纯表现：光束残留时长
+    echoDelayMs: 400,   // 「二次脉冲」卡：0.4s 后沿原路径再打一次（50% 伤害）
   },
   // 制导激光：窄扇形左右扫射，逐 tick 命中扇面内敌人（对空/对散开队形覆盖）。
   laser: {
@@ -220,7 +221,7 @@ export const SKILLS = {
   flame: {
     name: '燃烧地带', key: '8', color: '#d1493a',
     cooldownMs: 6500,
-    dmgTick: 15,        // 每 0.5s 一跳 ≈ 30/s
+    dmgTick: 22,        // 每 0.5s 一跳 ≈ 44/s（2026-11-03 用户反馈"伤害比较小"，15→22）
     tickMs: 500,
     r: 72,
     lifeMs: 5000,
@@ -289,12 +290,22 @@ function defaultMods() {
     dmgVsShock: 1,        // 导电体：对感电目标
     xpRate: 1,            // 快速学习
     skillCdMul: { freeze: 1, burn: 1, shock: 1, vehicle: 1, ray: 1, laser: 1, turret: 1, flame: 1, saw: 1 },
-    // ── 五技能补齐（2026-11-03）：各技能「伤害 / 冷却 / 数量」三角修正 ──
-    rayDmgMul: 1, rayDurBonus: 0, rayCount: 0,
-    laserDmgMul: 1, laserRangeMul: 1, laserCount: 0,
+    // ── 五技能（2026-11-03 补齐 + 同日海克斯扩容）：三角 + 形态/状态/质变 ──
+    rayDmgMul: 1, rayCount: 0, rayWidthMul: 1,
+    raySlow: 0,           // 灼热光束（减速幅度，0/0.4）
+    rayVuln: 0,           // 感光标记（0/1）
+    rayKnock: 0,          // 冲击光束击退距离
+    rayEcho: 0,           // 二次脉冲（0/1）
+    laserDmgMul: 1, laserRangeMul: 1, laserWidthMul: 1, laserCount: 0,
+    laserSlow: 0, laserVuln: 0, laserBurn: 0, laserKnock: 0, laserFinale: 0,
     turretDmgMul: 1, turretRangeMul: 1, turretCount: 0,
+    turretSlow: 0, turretVuln: 0, turretNetwork: 0, turretBoom: 0,
     flameDmgMul: 1, flameRadiusMul: 1, flameCount: 0,
+    flameSlowAdd: 0,      // 粘性焦土（在基础减速上叠加）
+    flameVuln: 0, flameBurnMul: 1, flameDurMul: 1,
     sawDmgMul: 1, sawSpeedMul: 1, sawCount: 0,
+    sawBounce: 0,         // 来回反弹次数（撞边折返并清命中记录）
+    sawSlow: 0, sawVuln: 0, sawGiant: 0, sawKnock: 0,
     // ── 装甲车（02 册六格 + 12/15/18/20 节点）──
     vehicleDmgMul: 1,       // ① 冲撞伤害倍率
     vehicleCount: 0,        // ② 冲撞次数（每次施放出场车辆数）
@@ -363,6 +374,10 @@ export function createWorld() {
     // true 时开局即允许按 C 打开卡池面板自选海克斯（不受等级/槽位限制），
     // 用于验证"某个 build 在实战里到底怎样"；正常模式下这两个字段都是 false。
     customMode: false,
+    // ── 定制模式测试开关（2026-11-03 用户要求：定制模式 = 纯测试模式）──
+    // noFire：主武器停火（F 切换）——测技能时不被主武器抢人头
+    // godFortress：要塞无敌（G 切换）——局不会因要塞破而结束，可长测
+    cheats: { noFire: false, godFortress: false },
     panelOpen: false,    // 面板打开 → 战斗暂停（见 update 早退）
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
     slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0, vehicle: 0, ray: 0, laser: 0, turret: 0, flame: 0, saw: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
@@ -657,6 +672,7 @@ export function chooseCard(world, idx) {
 
 // 要塞受击：敌人按自身攻击频率持续掉要塞的血（不是撞上来一次性扣命）
 function damageFortress(world, dmg, enemy) {
+  if (world.cheats?.godFortress) return; // 定制模式「要塞无敌」（G 切换）：不掉血、局不结束
   world.fortressHp = Math.max(0, world.fortressHp - dmg);
   world.fortressFlash = 220;
   world.fortressRegenHold = 3000; // 受击后 3 秒内不回血（防止边啃边回显得假）
@@ -1002,7 +1018,7 @@ export function castSkill(world, id) {
   }
 
   // ── 五技能（2026-11-03 补齐）：均不走 skillShots，各自建实体 ──
-  // 高能射线：朝最近敌人的方向锁一道持续光束（无敌人则不空放、不耗冷却）
+  // 高能射线（瞬发版）：施放瞬间对沿线上所有敌人结算一次，光束只作表现残留
   if (id === 'ray') {
     const tgt = acquireTarget(world);
     if (!tgt) return false;
@@ -1010,12 +1026,7 @@ export function castSkill(world, id) {
     const baseAng = Math.atan2(tgt.y - pet.y, tgt.x - pet.x);
     const n = 1 + m.rayCount;
     for (let i = 0; i < n; i++) {
-      const a = baseAng + (i - (n - 1) / 2) * 0.14;
-      const life = sk.durMs + m.rayDurBonus;
-      world.beams.push({
-        x: pet.x, y: pet.y, ang: a, life, maxLife: life,
-        tickTimer: 0, dmg: sk.dmg * m.rayDmgMul, len: sk.len, halfWidth: sk.halfWidth, color: sk.color,
-      });
+      fireRayBeam(world, baseAng + (i - (n - 1) / 2) * 0.14);
     }
     world.petFlash = 320;
     slot.cd = sk.cooldownMs * m.skillCdMul[id];
@@ -1033,7 +1044,7 @@ export function castSkill(world, id) {
       world.sweeps.push({
         x: pet.x, y: pet.y, ang0: a, t: 0, life: sk.durMs, maxLife: sk.durMs,
         tickTimer: 0, dmg: sk.dmg * m.laserDmgMul, range: sk.range * m.laserRangeMul,
-        halfAngle: sk.halfAngle, sweepAmp: sk.sweepAmp, color: sk.color,
+        halfAngle: sk.halfAngle * m.laserWidthMul, sweepAmp: sk.sweepAmp, color: sk.color,
       });
     }
     world.petFlash = 320;
@@ -1055,32 +1066,51 @@ export function castSkill(world, id) {
     slot.cd = sk.cooldownMs * m.skillCdMul[id];
     return true;
   }
-  // 燃烧地带：在场中段铺 1~N 片火区
+  // 燃烧地带（2026-11-03 用户反馈：随机落点体验差）→ 优先放在**敌人最密集处**，无敌人再随机
   if (id === 'flame') {
     const n = 1 + m.flameCount;
+    let cx = null, cy = null;
+    const band = world.enemies.filter((e) => e.alive && e.y > WORLD.H * 0.3 && e.y < FORTRESS.attackLine);
+    if (band.length) {
+      let bestN = -1;
+      for (const e0 of band) {
+        let cnt = 0, sx = 0, sy = 0;
+        for (const e of band) {
+          if (dist2(e0.x, e0.y, e.x, e.y) <= 80 * 80) { cnt++; sx += e.x; sy += e.y; }
+        }
+        if (cnt > bestN) { bestN = cnt; cx = sx / cnt; cy = sy / cnt; }
+      }
+    }
     for (let i = 0; i < n; i++) {
-      const lane = 60 + Math.random() * (WORLD.W - 120);
+      const x = cx != null ? cx + (i - (n - 1) / 2) * 74 : 60 + Math.random() * (WORLD.W - 120);
+      const y = cy != null ? cy : Math.round(WORLD.H * 0.5);
       world.flames.push({
-        x: lane + (i - (n - 1) / 2) * 74, y: Math.round(WORLD.H * 0.5),
-        r: sk.r * m.flameRadiusMul, life: sk.lifeMs, maxLife: sk.lifeMs, tickTimer: 0,
-        dmgTick: sk.dmgTick * m.flameDmgMul, burnMs: sk.burnMs,
-        slowMag: sk.slowMag, slowMs: sk.slowMs, color: sk.color,
+        x: Math.max(40, Math.min(WORLD.W - 40, x)),
+        y: Math.max(WORLD.H * 0.3, Math.min(FORTRESS.attackLine - 60, y)),
+        r: sk.r * m.flameRadiusMul,
+        life: sk.lifeMs * m.flameDurMul, maxLife: sk.lifeMs * m.flameDurMul, tickTimer: 0,
+        dmgTick: sk.dmgTick * m.flameDmgMul, burnMs: sk.burnMs, burnMul: m.flameBurnMul,
+        slowMag: sk.slowMag + m.flameSlowAdd, slowMs: sk.slowMs, color: sk.color,
       });
     }
     world.petFlash = 320;
     slot.cd = sk.cooldownMs * m.skillCdMul[id];
     return true;
   }
-  // 旋转刀轮：从随机一侧横向滚过整屏
+  // 旋转刀轮：从随机一侧横向滚过整屏（巨型卡放大体积/伤害；反弹卡给折返次数）
   if (id === 'saw') {
     const n = 1 + m.sawCount;
+    const giant = m.sawGiant ? 1 : 0;
     for (let i = 0; i < n; i++) {
       const fromLeft = Math.random() < 0.5;
       const y = 200 + Math.random() * (FORTRESS.attackLine - 320);
       world.saws.push({
         x: fromLeft ? -22 : WORLD.W + 22, y: y + (i - (n - 1) / 2) * 72,
-        vx: (fromLeft ? 1 : -1) * sk.speed * m.sawSpeedMul, r: sk.r,
-        life: sk.lifeMs, dmg: sk.dmg * m.sawDmgMul, hitIds: [], color: sk.color, spin: 0,
+        vx: (fromLeft ? 1 : -1) * sk.speed * m.sawSpeedMul,
+        r: sk.r * (giant ? 1.6 : 1),
+        life: sk.lifeMs + m.sawBounce * 3500, // 反弹折返需要更长的存在时间
+        dmg: sk.dmg * m.sawDmgMul * (giant ? 1.3 : 1),
+        bounces: m.sawBounce, hitIds: [], color: sk.color, spin: 0,
       });
     }
     world.petFlash = 320;
@@ -1111,6 +1141,51 @@ export function castSkill(world, id) {
   world.petFlash = 320; // 机器人出手闪光
   slot.cd = sk.cooldownMs * m.skillCdMul[id];
   return true;
+}
+
+// 高能射线（瞬发版）：沿 ang 直线结算一次伤害 + 光束表现残留。
+// dmgRatio：二次脉冲复用（0.5）；echo 卡只挂在本体光束上。
+function fireRayBeam(world, ang, dmgRatio = 1) {
+  const sk = SKILLS.ray, m = world.mods;
+  const halfWidth = sk.halfWidth * m.rayWidthMul;
+  const pet = petPos(world);
+  const dx = Math.cos(ang), dy = Math.sin(ang);
+  for (const e of world.enemies) {
+    if (!e.alive) continue;
+    const rx = e.x - pet.x, ry = e.y - pet.y;
+    const along = rx * dx + ry * dy;
+    if (along < 0 || along > sk.len) continue;
+    if (Math.abs(rx * -dy + ry * dx) > halfWidth + e.radius) continue;
+    dealDamage(world, e, sk.dmg * m.rayDmgMul * dmgRatio, 'ray');
+    if (!e.alive) continue;
+    if (m.raySlow) apply(e.st, 'slow', m.raySlow, 1500, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
+    if (m.rayVuln) apply(e.st, 'vuln', 0.25, 5000, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
+    if (m.rayKnock) apply(e.st, 'knock', m.rayKnock, 0, { sourceId: 'skill-ray', sourceLevel: 1, displaceType: 'normal' });
+  }
+  const withEcho = !!m.rayEcho && dmgRatio === 1;
+  const life = sk.flashMs + (withEcho ? sk.echoDelayMs + sk.flashMs : 0);
+  world.beams.push({
+    x: pet.x, y: pet.y, ang, len: sk.len, halfWidth, life, maxLife: life, color: sk.color,
+    echo: withEcho, echoTimer: withEcho ? sk.echoDelayMs : 0, echoDone: false,
+  });
+}
+
+// 制导激光「终焉爆裂」（20 级节点卡）：扫射结束时沿光路终点追加一次爆炸
+function explodeLaserFinale(world, s) {
+  const m = world.mods;
+  const ang = s.ang0 + Math.sin((s.t / 1000) * Math.PI * 1.1) * s.sweepAmp;
+  const px = s.x + Math.cos(ang) * s.range * 0.6;
+  const py = s.y + Math.sin(ang) * s.range * 0.6;
+  for (const e of world.enemies) {
+    if (!e.alive) continue;
+    const rr = 90 + e.radius;
+    if (dist2(px, py, e.x, e.y) <= rr * rr) dealDamage(world, e, 120 * m.laserDmgMul, 'laser');
+  }
+  addRing(world, px, py, 90, SKILLS.laser.color);
+  for (let i = 0; i < 12; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 130;
+    addParticle(world, px, py, Math.cos(a) * sp, Math.sin(a) * sp, 340, SKILLS.laser.color, 3);
+  }
 }
 
 function skillShotOffscreen(s) {
@@ -1183,7 +1258,8 @@ export function update(world, dtMs) {
     if (p.reloadTimer <= 0) { p.reloading = false; p.ammo = magSizeOf(world); }
   } else {
     p.fireTimer -= dtMs;
-    if (target && p.fireTimer <= 0 && p.ammo > 0) fire(world, target);
+    // 定制模式「主武器停火」（F 切换）：测技能时不被主武器抢人头
+    if (target && p.fireTimer <= 0 && p.ammo > 0 && !world.cheats?.noFire) fire(world, target);
   }
 
   // ── 敌人推进 + 状态结算（tick 推进冻结/眩晕/灼烧等生命周期）──
@@ -1329,27 +1405,17 @@ export function update(world, dtMs) {
   }
 
   // ── 五技能实体推进 / 结算（2026-11-03 补齐，统一走 dealDamage）──
-  // 高能射线：逐 tick 命中沿光束线的敌人（点到线距离判定）
-  for (const b of world.beams) {
+  // 高能射线（瞬发版）：光束只是表现残留；「二次脉冲」卡到点后沿原路径补一次 50% 伤害
+  for (const b of [...world.beams]) {
     b.life -= dtMs;
-    b.tickTimer -= dtMs;
-    if (b.tickTimer <= 0) {
-      b.tickTimer = SKILLS.ray.tickMs;
-      const dx = Math.cos(b.ang), dy = Math.sin(b.ang);
-      for (const e of world.enemies) {
-        if (!e.alive) continue;
-        const rx = e.x - b.x, ry = e.y - b.y;
-        const along = rx * dx + ry * dy;
-        if (along < 0 || along > b.len) continue;
-        const perp = Math.abs(rx * -dy + ry * dx);
-        if (perp > b.halfWidth + e.radius) continue;
-        dealDamage(world, e, b.dmg, 'ray');
-      }
+    if (b.echo && !b.echoDone) {
+      b.echoTimer -= dtMs;
+      if (b.echoTimer <= 0) { b.echoDone = true; fireRayBeam(world, b.ang, 0.5); }
     }
   }
   world.beams = world.beams.filter((b) => b.life > 0);
 
-  // 制导激光：扇面左右扫动，逐 tick 命中扇面内敌人（cos 夹角判定）
+  // 制导激光：扇面左右扫动，逐 tick 命中扇面内敌人（cos 夹角判定）+ 状态卡
   for (const s of world.sweeps) {
     s.life -= dtMs; s.t += dtMs; s.tickTimer -= dtMs;
     if (s.tickTimer <= 0) {
@@ -1364,12 +1430,22 @@ export function update(world, dtMs) {
         if (d < 1 || d > s.range + e.radius) continue;
         if ((rx * dx + ry * dy) / d < cosHalf) continue;
         dealDamage(world, e, s.dmg, 'laser');
+        if (!e.alive) continue;
+        if (m.laserSlow) apply(e.st, 'slow', 0.15, 1200, { sourceId: 'skill-laser', sourceLevel: 1, displaceType: 'normal' });
+        if (m.laserVuln) apply(e.st, 'vuln', 0.2, 5000, { sourceId: 'skill-laser', sourceLevel: 1, displaceType: 'normal' });
+        if (m.laserBurn) apply(e.st, 'burn', 6, 2000, { sourceId: 'skill-laser', sourceLevel: 1, displaceType: 'normal' });
+        if (m.laserKnock) apply(e.st, 'knock', 18, 0, { sourceId: 'skill-laser', sourceLevel: 1, displaceType: 'normal' });
       }
     }
   }
+  // 「终焉爆裂」卡（20 级节点）：扫射结束时沿光路终点追加一次爆炸
+  for (const s of world.sweeps) {
+    if (s.life > 0 || !m.laserFinale) continue;
+    explodeLaserFinale(world, s);
+  }
   world.sweeps = world.sweeps.filter((s) => s.life > 0);
 
-  // 哨戒机：到点就打射程内最近敌人（瞬时结算 + 视觉弹道）
+  // 哨戒机：到点就打射程内最近敌人（瞬时结算 + 视觉弹道）+ 状态/协同卡
   for (const t of world.turrets) {
     t.life -= dtMs; t.fireTimer -= dtMs;
     if (t.fireTimer <= 0) {
@@ -1382,9 +1458,25 @@ export function update(world, dtMs) {
       if (best) {
         t.fireTimer = SKILLS.turret.fireIntervalMs;
         world.turretShots.push({ x: t.x, y: t.y, tx: best.x, ty: best.y, life: 120 });
-        dealDamage(world, best, t.dmg, 'turret');
+        // 协同射击（⑥）：每多存在一台炮台，所有炮台伤害 +10%
+        const net = m.turretNetwork ? 1 + 0.1 * Math.max(0, world.turrets.length - 1) : 1;
+        dealDamage(world, best, t.dmg * net, 'turret');
+        if (best.alive) {
+          if (m.turretSlow) apply(best.st, 'slow', 0.15, 1000, { sourceId: 'skill-turret', sourceLevel: 1, displaceType: 'normal' });
+          if (m.turretVuln) apply(best.st, 'vuln', 0.15, 5000, { sourceId: 'skill-turret', sourceLevel: 1, displaceType: 'normal' });
+        }
       }
     }
+  }
+  // 「到期自爆」卡：炮台存在结束时对周围爆炸
+  for (const t of world.turrets) {
+    if (t.life > 0 || !m.turretBoom) continue;
+    for (const e of world.enemies) {
+      if (!e.alive) continue;
+      const rr = 70 + e.radius;
+      if (dist2(t.x, t.y, e.x, e.y) <= rr * rr) dealDamage(world, e, 60, 'turret');
+    }
+    addRing(world, t.x, t.y, 70, SKILLS.turret.color);
   }
   world.turrets = world.turrets.filter((t) => t.life > 0);
   for (const s of world.turretShots) s.life -= dtMs;
@@ -1401,28 +1493,36 @@ export function update(world, dtMs) {
         if (dist2(f.x, f.y, e.x, e.y) > rr * rr) continue;
         dealDamage(world, e, f.dmgTick, 'burn');
         if (!e.alive) continue;
-        apply(e.st, 'burn', f.dmgTick * 0.4, f.burnMs, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
+        apply(e.st, 'burn', f.dmgTick * 0.4 * (f.burnMul || 1), f.burnMs, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
         apply(e.st, 'slow', f.slowMag, f.slowMs, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
+        if (m.flameVuln) apply(e.st, 'vuln', 0.2, 5000, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
       }
     }
   }
   world.flames = world.flames.filter((f) => f.life > 0);
 
-  // 旋转刀轮：横向滚动，每个敌人只吃一次切割
+  // 旋转刀轮：横向滚动，每个敌人只吃一次切割；「来回反弹」卡撞边折返并清命中记录（回程可再打一轮）
   for (const s of world.saws) {
     s.life -= dtMs;
     s.x += s.vx * (dtMs / 1000);
     s.spin += dtMs;
+    if ((s.x < s.r && s.vx < 0) || (s.x > WORLD.W - s.r && s.vx > 0)) {
+      if (s.bounces > 0) { s.bounces -= 1; s.vx *= -1; s.hitIds.length = 0; }
+    }
     for (const e of world.enemies) {
       if (!e.alive || s.hitIds.includes(e.id)) continue;
       const rr = s.r + e.radius;
       if (dist2(s.x, s.y, e.x, e.y) <= rr * rr) {
         s.hitIds.push(e.id);
         dealDamage(world, e, s.dmg, 'saw');
+        if (!e.alive) continue;
+        if (m.sawSlow) apply(e.st, 'slow', 0.2, 1500, { sourceId: 'skill-saw', sourceLevel: 1, displaceType: 'normal' });
+        if (m.sawVuln) apply(e.st, 'vuln', 0.2, 5000, { sourceId: 'skill-saw', sourceLevel: 1, displaceType: 'normal' });
+        if (m.sawKnock) apply(e.st, 'knock', 20, 0, { sourceId: 'skill-saw', sourceLevel: 1, displaceType: 'normal' });
       }
     }
   }
-  world.saws = world.saws.filter((s) => s.life > 0 && s.x > -60 && s.x < WORLD.W + 60);
+  world.saws = world.saws.filter((s) => s.life > 0 && s.x > -80 && s.x < WORLD.W + 80);
 
   // ── 粒子 / 浮字 / 光环寿命 ──
   for (const pt of world.particles) { pt.x += pt.vx * (dtMs / 1000); pt.y += pt.vy * (dtMs / 1000); pt.life -= dtMs; }

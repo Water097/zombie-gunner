@@ -78,6 +78,12 @@ window.addEventListener('keydown', (e) => {
     }
     return;
   }
+  // 定制模式测试开关（2026-11-03 用户要求：定制模式 = 纯测试模式）
+  // F = 主武器停火/恢复（测技能时不被主武器抢人头）；G = 要塞无敌/恢复（局不会结束）
+  if (world.customMode && world.started) {
+    if (e.key === 'f' || e.key === 'F') { world.cheats.noFire = !world.cheats.noFire; return; }
+    if (e.key === 'g' || e.key === 'G') { world.cheats.godFortress = !world.cheats.godFortress; return; }
+  }
   // 选卡时 1/2/3 = 选第几张（界面不显示序号，键盘仍可用）
   if (world.cardPhase && ['1', '2', '3', '4'].includes(e.key)) { chooseCard(world, Number(e.key) - 1); return; }
   // 已学技能：数字键按槽位释放（槽位 = 学习顺序，1 = 最先学的技能）
@@ -673,6 +679,14 @@ function drawHUD() {
   ctx.fillStyle = 'rgba(8,12,24,0.6)'; ctx.fillRect(0, 0, WORLD.W, 34);
   ctx.fillStyle = '#e7eefc'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'left';
   ctx.fillText(`分数 ${world.score}`, 12, 22);
+  // 定制模式测试开关状态（F/G）
+  if (world.customMode && world.started) {
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = world.cheats.noFire ? '#ff9a3c' : 'rgba(160,190,230,0.75)';
+    ctx.fillText(`主武器${world.cheats.noFire ? '关' : '开'}(F)`, 110, 22);
+    ctx.fillStyle = world.cheats.godFortress ? '#7fe07f' : 'rgba(160,190,230,0.75)';
+    ctx.fillText(`要塞无敌${world.cheats.godFortress ? '开' : '关'}(G)`, 178, 22);
+  }
   ctx.textAlign = 'center';
   ctx.fillText(`第 ${world.wave} / ${RUN.maxWave} 波`, WORLD.W / 2 - 40, 22);
 

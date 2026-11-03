@@ -1083,21 +1083,22 @@ console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃
   ok('SKILLS 共 9 技能', Object.keys(SKILLS).length === 9);
   ok('五技能均有 name/color/cooldownMs', keys.every((k) => SKILLS[k] && SKILLS[k].name && SKILLS[k].color && SKILLS[k].cooldownMs > 0));
   ok('mods.skillCdMul 覆盖 9 技能', keys.every((k) => typeof createWorld().mods.skillCdMul[k] === 'number'));
+  ok('五技能 count 修正字段均为数值（防 NaN 施放静默空转）', keys.every((k) => typeof createWorld().mods[`${k}Count`] === 'number'));
   ok('LEARN_CARDS 共 9 张（含五技能）', LEARN_CARDS.length === 9 && keys.every((k) => LEARN_CARDS.some((c) => c.target === k)));
-  ok('五技能各至少有一张专属卡', keys.every((k) => CARDS.some((c) => c.target === k)));
+  ok('五技能海克斯各 ≥8 张（伤害/冷却/数量/形态/状态/易伤/质变）', keys.every((k) => CARDS.filter((c) => c.target === k).length >= 8));
 
   // 通用隔离：屏蔽其它技能自动释放 + 关掉主武器 + 停止出怪
   const isolate = (w) => { muteSkills(w); w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; w.spawnTimer = 1e9; };
 
-  // 高能射线：锁敌直线光束，逐 tick 伤害
+  // 高能射线（瞬发版，2026-11-03 用户反馈改形态）：施放瞬间结算一次，光束只作表现
   {
     const w = createWorld(); w.running = true; isolate(w);
     const e = makeEnemyEntity('zombie', PLAYER.x, 300); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
     w.enemies.push(e); learnSkill(w, 'ray');
+    const hp0 = e.hp;
     const okCast = castSkill(w, 'ray');
-    ok('高能射线：施放生成 1 道光束', okCast && w.beams.length === 1);
-    const hp0 = e.hp; for (let i = 0; i < 5; i++) update(w, 16);
-    ok('高能射线：光束对沿线敌人造成伤害', e.hp < hp0);
+    ok('高能射线：施放瞬间对沿线敌人造成伤害（不再多段跳）', okCast && e.hp < hp0);
+    ok('高能射线：光束仅作表现残留', w.beams.length === 1);
   }
   // 制导激光：窄扇面扫到敌人伤害
   {
@@ -1122,18 +1123,20 @@ console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃
     ok('哨戒机：自动打击射程内敌人', e.hp < hp0);
     ok('哨戒机：开火有视觉弹道', w.turretShots.length > 0 || e.hp < hp0);
   }
-  // 燃烧地带：火区灼烧 + 减速区域内敌人
+  // 燃烧地带：落点在敌人密集处（2026-11-03 用户反馈：不再纯随机）+ 灼烧减速
   {
     const w = createWorld(); w.running = true; isolate(w);
     learnSkill(w, 'flame');
+    const e1 = makeEnemyEntity('zombie', 200, 400); e1.hp = 9999; e1.maxHp = 9999; e1.speed = 0;
+    const e2 = makeEnemyEntity('zombie', 228, 418); e2.hp = 9999; e2.maxHp = 9999; e2.speed = 0;
+    w.enemies.push(e1, e2);
     const okCast = castSkill(w, 'flame');
-    ok('燃烧地带：施放生成 1 片火区', okCast && w.flames.length === 1);
     const f = w.flames[0];
-    const e = makeEnemyEntity('zombie', f.x, f.y); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
-    w.enemies.push(e);
-    const hp0 = e.hp; for (let i = 0; i < 3; i++) update(w, 16);
-    ok('燃烧地带：火区灼烧区域内敌人', e.hp < hp0);
-    ok('燃烧地带：区域内敌人被减速', has(e.st, 'slow') || has(e.st, 'burn'));
+    ok('燃烧地带：施放生成 1 片火区', okCast && w.flames.length === 1);
+    ok('燃烧地带：落点在敌人密集处（不再纯随机）', Math.abs(f.x - 214) < 130 && Math.abs(f.y - 409) < 130);
+    const hp0 = e1.hp; for (let i = 0; i < 3; i++) update(w, 16);
+    ok('燃烧地带：火区灼烧区域内敌人', e1.hp < hp0);
+    ok('燃烧地带：区域内敌人被减速', has(e1.st, 'slow') || has(e1.st, 'burn'));
   }
   // 旋转刀轮：横向滚过，敌人只吃一次切割
   {
@@ -1147,6 +1150,33 @@ console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃
     const hp0 = e.hp; for (let i = 0; i < 3; i++) update(w, 16);
     ok('旋转刀轮：滚过敌人造成切割伤害', e.hp < hp0);
     ok('旋转刀轮：同一敌人只记一次命中', s.hitIds.includes(e.id));
+  }
+  // 旋转刀轮「来回反弹」卡：撞边折返 + 清空命中记录（回程可再打一轮）
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    learnSkill(w, 'saw');
+    w.mods.sawBounce = 3;
+    castSkill(w, 'saw');
+    const s = w.saws[0];
+    s.x = 10; s.vx = -300; // 手动摆在左缘、向左滚 → 应折返
+    update(w, 16);
+    ok('旋转刀轮：反弹卡生效（撞边折返 + 次数-1 + 清命中记录）', s.vx > 0 && s.bounces === 2 && s.hitIds.length === 0);
+  }
+  // 定制模式测试开关：主武器停火 + 要塞无敌
+  {
+    const w = createWorld(); w.running = true; w.spawnTimer = 1e9;
+    const e = makeEnemyEntity('bomber', 225, FORTRESS.attackLine); e.id = 9500; e.speed = 0;
+    w.enemies.push(e);
+    w.cheats.godFortress = true;
+    const hp0 = w.fortressHp;
+    for (let i = 0; i < 6; i++) update(w, 16); // 自爆兵抵线引爆
+    ok('要塞无敌：自爆/啃咬不掉要塞血', w.fortressHp === hp0);
+    w.cheats.godFortress = false; w.cheats.noFire = true;
+    const e2 = makeEnemyEntity('zombie', PLAYER.x, 300); e2.id = 9501; e2.speed = 0;
+    w.enemies.push(e2);
+    const b0 = w.bullets.length;
+    for (let i = 0; i < 10; i++) update(w, 16);
+    ok('主武器停火：不开火不生成子弹', w.bullets.length === b0);
   }
   // 4 槽上限：已学 4 技能后不再发学习卡（9 技能里一局最多选 4 条线）
   {
