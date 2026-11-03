@@ -182,6 +182,61 @@ export const SKILLS = {
     laneOffset: 62,     // 多车同场时的横向间隔
     lifeMs: 6500,       // 存在时间上限（防止卡在场上）；每次降速都等比例延长，保证行进总距离不变（原 420×2.6s ≈ 1092px → 168×6.5s）
   },
+
+  // ── 五技能补齐（2026-11-03）：高能射线 / 制导激光 / 哨戒机 / 燃烧地带 / 旋转刀轮 ──
+  // 形态与 02 册 3.1 空间占位一一对应；⚠️ 全部临时基准值，数值阶段统一校准。
+  // 高能射线：竖直/斜向一道持续光束，方向在施放时锁定，逐 tick 命中沿线的敌人（不吃弹夹）。
+  ray: {
+    name: '高能射线', key: '5', color: '#3fe0d0',
+    cooldownMs: 7500,
+    dmg: 18,            // 每 tick 伤害（0.2s 一跳）
+    durMs: 1600,        // 持续 1.6s ≈ 8 跳
+    tickMs: 200,
+    len: 620,           // 光束长度
+    halfWidth: 10,      // 光束半宽（配合敌人半径判定）
+  },
+  // 制导激光：窄扇形左右扫射，逐 tick 命中扇面内敌人（对空/对散开队形覆盖）。
+  laser: {
+    name: '制导激光', key: '6', color: '#ffe14d',
+    cooldownMs: 10300,
+    dmg: 10,            // 每 tick 伤害
+    durMs: 4000,
+    tickMs: 200,
+    range: 540,         // 扫射长度
+    halfAngle: 0.11,    // 扇面半角（≈6°，窄）
+    sweepAmp: 0.9,      // 左右扫动幅度（rad）
+  },
+  // 哨戒机：在要塞前方部署一台固定炮台，自动打射程内最近敌人（兜底·不需瞄准）。
+  turret: {
+    name: '哨戒机', key: '7', color: '#9aa5b1',
+    cooldownMs: 14000,
+    dmg: 45,
+    fireIntervalMs: 500,
+    range: 250,
+    r: 12,
+    lifeMs: 14000,      // 存在 14s ≈ 与 CD 同步，常驻 1 台（02 册"共存 1"）
+  },
+  // 燃烧地带：在场地中段留一片火区，逐 0.5s 灼烧并减速区域内敌人（封锁地面）。
+  flame: {
+    name: '燃烧地带', key: '8', color: '#d1493a',
+    cooldownMs: 6500,
+    dmgTick: 15,        // 每 0.5s 一跳 ≈ 30/s
+    tickMs: 500,
+    r: 72,
+    lifeMs: 5000,
+    burnMs: 2000,
+    slowMag: 0.25,
+    slowMs: 1000,
+  },
+  // 旋转刀轮：从一侧横向滚过整屏，路上敌人各吃一次切割（清越线者）。
+  saw: {
+    name: '旋转刀轮', key: '9', color: '#cfd8e3',
+    cooldownMs: 5200,
+    dmg: 35,
+    speed: 300,
+    r: 18,
+    lifeMs: 6000,
+  },
 };
 
 let _idSeq = 1;
@@ -233,7 +288,13 @@ function defaultMods() {
     dmgVsBurn: 1,         // 助燃：对燃烧目标
     dmgVsShock: 1,        // 导电体：对感电目标
     xpRate: 1,            // 快速学习
-    skillCdMul: { freeze: 1, burn: 1, shock: 1, vehicle: 1 },
+    skillCdMul: { freeze: 1, burn: 1, shock: 1, vehicle: 1, ray: 1, laser: 1, turret: 1, flame: 1, saw: 1 },
+    // ── 五技能补齐（2026-11-03）：各技能「伤害 / 冷却 / 数量」三角修正 ──
+    rayDmgMul: 1, rayDurBonus: 0, rayCount: 0,
+    laserDmgMul: 1, laserRangeMul: 1, laserCount: 0,
+    turretDmgMul: 1, turretRangeMul: 1, turretCount: 0,
+    flameDmgMul: 1, flameRadiusMul: 1, flameCount: 0,
+    sawDmgMul: 1, sawSpeedMul: 1, sawCount: 0,
     // ── 装甲车（02 册六格 + 12/15/18/20 节点）──
     vehicleDmgMul: 1,       // ① 冲撞伤害倍率
     vehicleCount: 0,        // ② 冲撞次数（每次施放出场车辆数）
@@ -277,6 +338,13 @@ export function createWorld() {
     vehicles: [], // 装甲车实体：{x,y,r,vy,life,hitCd(每人冷却),firstHit,ramp}
     enemyShots: [], // 远程兵喷吐的弹丸（打要塞）：{x,y,vx,vy,dmg,life,radius,color}
     pendingEnemies: [], // 本帧新生成的敌人（分裂子代/蜂群），循环后再并入，避免边遍历边追加
+    // ── 五技能实体（2026-11-03 补齐）──
+    beams: [],      // 高能射线：{x,y,ang,life,maxLife,tickTimer,dmg,len,halfWidth,color}
+    sweeps: [],     // 制导激光：{x,y,ang0,t,life,maxLife,tickTimer,dmg,range,halfAngle,sweepAmp,color}
+    turrets: [],    // 哨戒机：{x,y,life,maxLife,fireTimer,range,dmg,r,color}
+    turretShots: [],// 哨戒机开火的视觉弹道（纯表现）：{x,y,tx,ty,life}
+    flames: [],     // 燃烧地带：{x,y,r,life,maxLife,tickTimer,dmgTick,burnMs,slowMag,slowMs,color}
+    saws: [],       // 旋转刀轮：{x,y,vx,r,life,dmg,hitIds,color,spin}
     particles: [],
     floaters: [],
     rings: [],
@@ -297,7 +365,7 @@ export function createWorld() {
     customMode: false,
     panelOpen: false,    // 面板打开 → 战斗暂停（见 update 早退）
     cardStacks: {},      // 每张卡已叠层数（叠满移出池）
-    slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0, vehicle: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
+    slotLevels: { weapon: 1, freeze: 0, burn: 0, shock: 0, vehicle: 0, ray: 0, laser: 0, turret: 0, flame: 0, saw: 0 }, // 各槽累计吃了几张卡（右上角显示）；武器开局即 1 级（角色初始 1 级）
     bonusTaken: 0,       // 已拿加成卡数（08 册软上限：按等级分层解锁）
     petFlash: 0,         // 宠物机器人释放技能时的闪光
     mercyArmed: false,   // 要塞血量首次跌破 50% → 下一抽出现「要塞急救」
@@ -499,14 +567,13 @@ function bomberExplode(world, e) {
   killEnemy(world, e);
 }
 
-// 远程兵喷吐：从自身朝要塞发射一枚弹丸，弹丸越线即命中要塞（见 update 的 enemyShots 推进）。
+// 远程兵喷吐：从自身**垂直直线**砸向要塞（不瞄准角色/玩家位置）。
+// 用户 2026-11-03 修正：敌人攻击的是"角色前面的要塞"，不是角色本身——弹丸应沿自身车道笔直下落到防线，而不是朝玩家汇聚成一点。
 function spawnEnemyShot(world, e) {
-  const p = world.player;
-  const ang = Math.atan2(p.y - e.y, p.x - e.x);
   const sp = 260;
   world.enemyShots.push({
     x: e.x, y: e.y,
-    vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+    vx: 0, vy: sp,   // 垂直向下：直线砸向要塞防线
     dmg: e.atkDmg, life: 4500, radius: 5, color: '#c8a8ff',
   });
 }
@@ -934,6 +1001,93 @@ export function castSkill(world, id) {
     return true;
   }
 
+  // ── 五技能（2026-11-03 补齐）：均不走 skillShots，各自建实体 ──
+  // 高能射线：朝最近敌人的方向锁一道持续光束（无敌人则不空放、不耗冷却）
+  if (id === 'ray') {
+    const tgt = acquireTarget(world);
+    if (!tgt) return false;
+    const pet = petPos(world);
+    const baseAng = Math.atan2(tgt.y - pet.y, tgt.x - pet.x);
+    const n = 1 + m.rayCount;
+    for (let i = 0; i < n; i++) {
+      const a = baseAng + (i - (n - 1) / 2) * 0.14;
+      const life = sk.durMs + m.rayDurBonus;
+      world.beams.push({
+        x: pet.x, y: pet.y, ang: a, life, maxLife: life,
+        tickTimer: 0, dmg: sk.dmg * m.rayDmgMul, len: sk.len, halfWidth: sk.halfWidth, color: sk.color,
+      });
+    }
+    world.petFlash = 320;
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+  // 制导激光：朝最近敌人方向左右扫射的窄扇面
+  if (id === 'laser') {
+    const tgt = acquireTarget(world);
+    if (!tgt) return false;
+    const pet = petPos(world);
+    const baseAng = Math.atan2(tgt.y - pet.y, tgt.x - pet.x);
+    const n = 1 + m.laserCount;
+    for (let i = 0; i < n; i++) {
+      const a = baseAng + (i - (n - 1) / 2) * 0.5;
+      world.sweeps.push({
+        x: pet.x, y: pet.y, ang0: a, t: 0, life: sk.durMs, maxLife: sk.durMs,
+        tickTimer: 0, dmg: sk.dmg * m.laserDmgMul, range: sk.range * m.laserRangeMul,
+        halfAngle: sk.halfAngle, sweepAmp: sk.sweepAmp, color: sk.color,
+      });
+    }
+    world.petFlash = 320;
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+  // 哨戒机：在要塞前方部署 1~N 台固定炮台
+  if (id === 'turret') {
+    const n = 1 + m.turretCount;
+    for (let i = 0; i < n; i++) {
+      const lane = 60 + Math.random() * (WORLD.W - 120);
+      world.turrets.push({
+        x: lane + (i - (n - 1) / 2) * 64, y: FORTRESS.attackLine - 140,
+        life: sk.lifeMs, maxLife: sk.lifeMs, fireTimer: 0,
+        range: sk.range * m.turretRangeMul, dmg: sk.dmg * m.turretDmgMul, r: sk.r, color: sk.color,
+      });
+    }
+    world.petFlash = 320;
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+  // 燃烧地带：在场中段铺 1~N 片火区
+  if (id === 'flame') {
+    const n = 1 + m.flameCount;
+    for (let i = 0; i < n; i++) {
+      const lane = 60 + Math.random() * (WORLD.W - 120);
+      world.flames.push({
+        x: lane + (i - (n - 1) / 2) * 74, y: Math.round(WORLD.H * 0.5),
+        r: sk.r * m.flameRadiusMul, life: sk.lifeMs, maxLife: sk.lifeMs, tickTimer: 0,
+        dmgTick: sk.dmgTick * m.flameDmgMul, burnMs: sk.burnMs,
+        slowMag: sk.slowMag, slowMs: sk.slowMs, color: sk.color,
+      });
+    }
+    world.petFlash = 320;
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+  // 旋转刀轮：从随机一侧横向滚过整屏
+  if (id === 'saw') {
+    const n = 1 + m.sawCount;
+    for (let i = 0; i < n; i++) {
+      const fromLeft = Math.random() < 0.5;
+      const y = 200 + Math.random() * (FORTRESS.attackLine - 320);
+      world.saws.push({
+        x: fromLeft ? -22 : WORLD.W + 22, y: y + (i - (n - 1) / 2) * 72,
+        vx: (fromLeft ? 1 : -1) * sk.speed * m.sawSpeedMul, r: sk.r,
+        life: sk.lifeMs, dmg: sk.dmg * m.sawDmgMul, hitIds: [], color: sk.color, spin: 0,
+      });
+    }
+    world.petFlash = 320;
+    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    return true;
+  }
+
   // 技能由宠物机器人释放：发射原点是机器人，不是要塞炮塔
   const pet = petPos(world);
   // 自动瞄准：取射程内最近敌人；无目标则朝正上方（避免空放）
@@ -1173,6 +1327,102 @@ export function update(world, dtMs) {
       s.dead = true;
     }
   }
+
+  // ── 五技能实体推进 / 结算（2026-11-03 补齐，统一走 dealDamage）──
+  // 高能射线：逐 tick 命中沿光束线的敌人（点到线距离判定）
+  for (const b of world.beams) {
+    b.life -= dtMs;
+    b.tickTimer -= dtMs;
+    if (b.tickTimer <= 0) {
+      b.tickTimer = SKILLS.ray.tickMs;
+      const dx = Math.cos(b.ang), dy = Math.sin(b.ang);
+      for (const e of world.enemies) {
+        if (!e.alive) continue;
+        const rx = e.x - b.x, ry = e.y - b.y;
+        const along = rx * dx + ry * dy;
+        if (along < 0 || along > b.len) continue;
+        const perp = Math.abs(rx * -dy + ry * dx);
+        if (perp > b.halfWidth + e.radius) continue;
+        dealDamage(world, e, b.dmg, 'ray');
+      }
+    }
+  }
+  world.beams = world.beams.filter((b) => b.life > 0);
+
+  // 制导激光：扇面左右扫动，逐 tick 命中扇面内敌人（cos 夹角判定）
+  for (const s of world.sweeps) {
+    s.life -= dtMs; s.t += dtMs; s.tickTimer -= dtMs;
+    if (s.tickTimer <= 0) {
+      s.tickTimer = SKILLS.laser.tickMs;
+      const ang = s.ang0 + Math.sin((s.t / 1000) * Math.PI * 1.1) * s.sweepAmp;
+      const dx = Math.cos(ang), dy = Math.sin(ang);
+      const cosHalf = Math.cos(s.halfAngle);
+      for (const e of world.enemies) {
+        if (!e.alive) continue;
+        const rx = e.x - s.x, ry = e.y - s.y;
+        const d = Math.hypot(rx, ry);
+        if (d < 1 || d > s.range + e.radius) continue;
+        if ((rx * dx + ry * dy) / d < cosHalf) continue;
+        dealDamage(world, e, s.dmg, 'laser');
+      }
+    }
+  }
+  world.sweeps = world.sweeps.filter((s) => s.life > 0);
+
+  // 哨戒机：到点就打射程内最近敌人（瞬时结算 + 视觉弹道）
+  for (const t of world.turrets) {
+    t.life -= dtMs; t.fireTimer -= dtMs;
+    if (t.fireTimer <= 0) {
+      let best = null, bd = Infinity;
+      for (const e of world.enemies) {
+        if (!e.alive) continue;
+        const d = dist2(t.x, t.y, e.x, e.y);
+        if (d <= t.range * t.range && d < bd) { bd = d; best = e; }
+      }
+      if (best) {
+        t.fireTimer = SKILLS.turret.fireIntervalMs;
+        world.turretShots.push({ x: t.x, y: t.y, tx: best.x, ty: best.y, life: 120 });
+        dealDamage(world, best, t.dmg, 'turret');
+      }
+    }
+  }
+  world.turrets = world.turrets.filter((t) => t.life > 0);
+  for (const s of world.turretShots) s.life -= dtMs;
+  world.turretShots = world.turretShots.filter((s) => s.life > 0);
+
+  // 燃烧地带：逐 tick 灼烧 + 减速区域内敌人
+  for (const f of world.flames) {
+    f.life -= dtMs; f.tickTimer -= dtMs;
+    if (f.tickTimer <= 0) {
+      f.tickTimer = SKILLS.flame.tickMs;
+      for (const e of world.enemies) {
+        if (!e.alive) continue;
+        const rr = f.r + e.radius;
+        if (dist2(f.x, f.y, e.x, e.y) > rr * rr) continue;
+        dealDamage(world, e, f.dmgTick, 'burn');
+        if (!e.alive) continue;
+        apply(e.st, 'burn', f.dmgTick * 0.4, f.burnMs, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
+        apply(e.st, 'slow', f.slowMag, f.slowMs, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
+      }
+    }
+  }
+  world.flames = world.flames.filter((f) => f.life > 0);
+
+  // 旋转刀轮：横向滚动，每个敌人只吃一次切割
+  for (const s of world.saws) {
+    s.life -= dtMs;
+    s.x += s.vx * (dtMs / 1000);
+    s.spin += dtMs;
+    for (const e of world.enemies) {
+      if (!e.alive || s.hitIds.includes(e.id)) continue;
+      const rr = s.r + e.radius;
+      if (dist2(s.x, s.y, e.x, e.y) <= rr * rr) {
+        s.hitIds.push(e.id);
+        dealDamage(world, e, s.dmg, 'saw');
+      }
+    }
+  }
+  world.saws = world.saws.filter((s) => s.life > 0 && s.x > -60 && s.x < WORLD.W + 60);
 
   // ── 粒子 / 浮字 / 光环寿命 ──
   for (const pt of world.particles) { pt.x += pt.vx * (dtMs / 1000); pt.y += pt.vy * (dtMs / 1000); pt.life -= dtMs; }

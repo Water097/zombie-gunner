@@ -14,6 +14,7 @@
 //     >10 级     → 每多 1 级再降 5%（0.85 / 0.80 / …，下限 0.2）
 
 export const MAX_LEVEL = 20; // 一局 20 次三选一（03 册）
+export const MAX_SKILL_SLOTS = 4; // 一局最多 4 个技能（与 main.mjs 技能槽数一致；9 技能里每局选 4 条线）
 
 // 经验曲线丙·修正版（2026-11-02 用户拍板：满级点从 17~18 波拉回「第 19 波中段」
 // ——第 19 波的僵尸出一半时升到 Lv20）。前段锚点不变，只拉开 Lv12→20 的每级需求。
@@ -57,6 +58,11 @@ export const LEARN_CARDS = [
   { id: 'learn-burn', kind: 'learn', target: 'burn', name: '温压弹', text: '学会【温压弹】· 火系爆炸，灼烧敌人' },
   { id: 'learn-shock', kind: 'learn', target: 'shock', name: '电磁天雷', text: '学会【电磁天雷】· 随机降下闪电，范围感电' },
   { id: 'learn-vehicle', kind: 'learn', target: 'vehicle', name: '装甲车', text: '学会【装甲车】· 物理碾压，击退推回警戒线' },
+  { id: 'learn-ray', kind: 'learn', target: 'ray', name: '高能射线', text: '学会【高能射线】· 能量系持续光束，锁敌输出' },
+  { id: 'learn-laser', kind: 'learn', target: 'laser', name: '制导激光', text: '学会【制导激光】· 能量系窄扇面扫射，清线与覆盖' },
+  { id: 'learn-turret', kind: 'learn', target: 'turret', name: '哨戒机', text: '学会【哨戒机】· 定点炮台自动兜底，不需瞄准' },
+  { id: 'learn-flame', kind: 'learn', target: 'flame', name: '燃烧地带', text: '学会【燃烧地带】· 地面火区封锁，持续灼烧减速' },
+  { id: 'learn-saw', kind: 'learn', target: 'saw', name: '旋转刀轮', text: '学会【旋转刀轮】· 横向滚刀，清越线者' },
 ];
 
 export const CARDS = [
@@ -165,6 +171,38 @@ export const CARDS = [
   { id: 'vehicle-frozen', kind: 'skill', target: 'vehicle', name: '冰冻碾碎', once: true, text: '【装甲车】碾过【冻结】单位伤害 +200%',
     apply: (m) => { m.vehicleLevel = 20; } },
 
+  // ── 五技能卡（2026-11-03 补齐）：各技能「伤害 / 冷却 / 数量」三角 ──
+  { id: 'ray-dmg', kind: 'skill', target: 'ray', name: '聚焦透镜', text: '【高能射线】伤害 +60%',
+    apply: (m) => { m.rayDmgMul += 0.6; } },
+  { id: 'ray-cd', kind: 'skill', target: 'ray', name: '能量回收', text: '【高能射线】冷却 -25%',
+    apply: (m) => { m.skillCdMul.ray *= 0.75; } },
+  { id: 'ray-count', kind: 'skill', target: 'ray', name: '多路并发', text: '【高能射线】光束 +1（微散）', maxStacks: 2,
+    apply: (m) => { m.rayCount += 1; } },
+  { id: 'laser-dmg', kind: 'skill', target: 'laser', name: '激光功率', text: '【制导激光】伤害 +60%',
+    apply: (m) => { m.laserDmgMul += 0.6; } },
+  { id: 'laser-cd', kind: 'skill', target: 'laser', name: '谐振充能', text: '【制导激光】冷却 -25%',
+    apply: (m) => { m.skillCdMul.laser *= 0.75; } },
+  { id: 'laser-range', kind: 'skill', target: 'laser', name: '广角扫描', text: '【制导激光】扫射长度 +25%',
+    apply: (m) => { m.laserRangeMul += 0.25; } },
+  { id: 'turret-dmg', kind: 'skill', target: 'turret', name: '穿甲弹芯', text: '【哨戒机】炮台伤害 +50%',
+    apply: (m) => { m.turretDmgMul += 0.5; } },
+  { id: 'turret-cd', kind: 'skill', target: 'turret', name: '快速部署', text: '【哨戒机】冷却 -25%',
+    apply: (m) => { m.skillCdMul.turret *= 0.75; } },
+  { id: 'turret-count', kind: 'skill', target: 'turret', name: '双联部署', text: '【哨戒机】+1 台炮台', maxStacks: 2,
+    apply: (m) => { m.turretCount += 1; } },
+  { id: 'flame-dmg', kind: 'skill', target: 'flame', name: '助燃剂', text: '【燃烧地带】每秒伤害 +60%',
+    apply: (m) => { m.flameDmgMul += 0.6; } },
+  { id: 'flame-cd', kind: 'skill', target: 'flame', name: '快速布设', text: '【燃烧地带】冷却 -25%',
+    apply: (m) => { m.skillCdMul.flame *= 0.75; } },
+  { id: 'flame-radius', kind: 'skill', target: 'flame', name: '区域蔓延', text: '【燃烧地带】区域半径 +20%',
+    apply: (m) => { m.flameRadiusMul += 0.2; } },
+  { id: 'saw-dmg', kind: 'skill', target: 'saw', name: '刀刃锐化', text: '【旋转刀轮】切割伤害 +60%',
+    apply: (m) => { m.sawDmgMul += 0.6; } },
+  { id: 'saw-cd', kind: 'skill', target: 'saw', name: '快速回收', text: '【旋转刀轮】冷却 -25%',
+    apply: (m) => { m.skillCdMul.saw *= 0.75; } },
+  { id: 'saw-count', kind: 'skill', target: 'saw', name: '多重刀轮', text: '【旋转刀轮】+1 个刀轮', maxStacks: 2,
+    apply: (m) => { m.sawCount += 1; } },
+
   // ── 加成卡 A 类：放大器（要求对应技能已学，否则是废卡）──
   // 强度纪律：条件卡 ≈ 同类无条件卡的 1.5~2 倍（补偿覆盖率；条件越苛刻倍率越高）
   { id: 'icebreak', kind: 'bonus', target: 'freeze', name: '破冰', text: '对【冻结】目标伤害 +30%',
@@ -268,8 +306,8 @@ export function rollCards(world) {
 
   const learnedCount = Object.keys(world.skills).length;
   const remaining = MAX_LEVEL - world.level;
-  // 停发新技能卡：技能学满（LEARN_CARDS 数量）或剩余选择不足 4 次时不再发
-  const canLearn = learnedCount < LEARN_CARDS.length && remaining >= 4;
+  // 停发新技能卡：技能学满 4 槽（9 技能里一局最多选 4 条线）或剩余选择不足 4 次时不再发
+  const canLearn = learnedCount < MAX_SKILL_SLOTS && remaining >= 4;
 
   // 方向计数（硬保底用）：本次三选一里每个方向已占几张
   const catCount = (c) => picks.filter((p) => categoryOf(p) === categoryOf(c)).length;

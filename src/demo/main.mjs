@@ -157,12 +157,17 @@ function render() {
   ctx.clearRect(0, 0, WORLD.W, WORLD.H);
   drawBackground();
   drawStorms();
+  drawFlames();     // 地面火区（在敌人之下）
   drawRings();
   drawStrikes();
   drawArcs();
   drawVehicles();
   drawEnemies();
   drawEnemyShots();
+  drawBeams();      // 光束/激光/炮台/刀轮在敌人之上
+  drawSweeps();
+  drawTurrets();
+  drawSaws();
   drawSkillShots();
   drawBullets();
   drawParticles();
@@ -383,6 +388,79 @@ function drawEnemyShots() {
     ctx.beginPath(); ctx.arc(s.x, s.y, s.radius + 2, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#b9a8e0';
     ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+// ── 五技能渲染（2026-11-03 补齐）──
+function drawBeams() {
+  for (const b of world.beams) {
+    const a = Math.max(0, b.life / b.maxLife);
+    const ex = b.x + Math.cos(b.ang) * b.len, ey = b.y + Math.sin(b.ang) * b.len;
+    ctx.globalAlpha = 0.22 * a; ctx.strokeStyle = b.color; ctx.lineWidth = b.halfWidth * 2;
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.globalAlpha = 0.9 * a; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(ex, ey); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+function drawSweeps() {
+  for (const s of world.sweeps) {
+    const a = Math.max(0, s.life / s.maxLife);
+    const ang = s.ang0 + Math.sin((s.t / 1000) * Math.PI * 1.1) * s.sweepAmp;
+    ctx.globalAlpha = 0.16 * a; ctx.fillStyle = s.color;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y);
+    ctx.arc(s.x, s.y, s.range, ang - s.halfAngle, ang + s.halfAngle); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 0.85 * a; ctx.strokeStyle = s.color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y);
+    ctx.lineTo(s.x + Math.cos(ang) * s.range, s.y + Math.sin(ang) * s.range); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+function drawTurrets() {
+  for (const s of world.turretShots) {
+    ctx.globalAlpha = Math.max(0, s.life / 120);
+    ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.tx, s.ty); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+  for (const t of world.turrets) {
+    const a = Math.min(1, t.life / 800);
+    ctx.globalAlpha = 0.06 * a; ctx.strokeStyle = t.color; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(t.x, t.y, t.range, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = a;
+    ctx.fillStyle = '#1a2233'; ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = t.color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.stroke();
+    ctx.strokeStyle = t.color; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x, t.y - t.r - 7); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+function drawFlames() {
+  for (const f of world.flames) {
+    const a = Math.max(0, f.life / f.maxLife);
+    ctx.globalAlpha = 0.18 * a + 0.05; ctx.fillStyle = f.color;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 0.5 * a; ctx.strokeStyle = '#ff9a3c'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.9 + Math.sin(f.life / 120) * 0.06), 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+}
+function drawSaws() {
+  for (const s of world.saws) {
+    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.spin / 80);
+    ctx.fillStyle = 'rgba(207,216,227,0.20)';
+    ctx.beginPath(); ctx.arc(0, 0, s.r + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = s.color; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(0, 0, s.r, 0, Math.PI * 2); ctx.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = (Math.PI * 2 * i) / 8;
+      ctx.beginPath();
+      ctx.moveTo(Math.cos(a) * s.r * 0.4, Math.sin(a) * s.r * 0.4);
+      ctx.lineTo(Math.cos(a) * s.r, Math.sin(a) * s.r);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 }
 
@@ -813,7 +891,12 @@ const PANEL_SUBS = [
   { id: 'freeze', label: '干冰' },
   { id: 'burn', label: '温压' },
   { id: 'shock', label: '电磁' },
-  { id: 'vehicle', label: '装甲车' },
+  { id: 'vehicle', label: '装甲' },
+  { id: 'ray', label: '高能' },
+  { id: 'laser', label: '制导' },
+  { id: 'turret', label: '哨戒' },
+  { id: 'flame', label: '燃烧' },
+  { id: 'saw', label: '刀轮' },
 ];
 
 function panelList() {
@@ -823,7 +906,7 @@ function panelList() {
 }
 
 function panelSubRects() {
-  const w = (PANEL.w - 24) / 4 - 6;
+  const w = (PANEL.w - 24) / PANEL_SUBS.length - 6;
   return PANEL_SUBS.map((t, i) => ({
     sub: t, x: PANEL.x + 12 + i * (w + 6), y: PANEL.y + 78, w, h: 24,
   }));

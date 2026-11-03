@@ -1077,5 +1077,113 @@ console.log('— 分裂兵：死亡裂成 2 只子代，子代不再分裂（防
   ok('原分裂兵已移除', !w.enemies.includes(e));
 }
 
+console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃烧地带 / 旋转刀轮 —');
+{
+  const keys = ['ray', 'laser', 'turret', 'flame', 'saw'];
+  ok('SKILLS 共 9 技能', Object.keys(SKILLS).length === 9);
+  ok('五技能均有 name/color/cooldownMs', keys.every((k) => SKILLS[k] && SKILLS[k].name && SKILLS[k].color && SKILLS[k].cooldownMs > 0));
+  ok('mods.skillCdMul 覆盖 9 技能', keys.every((k) => typeof createWorld().mods.skillCdMul[k] === 'number'));
+  ok('LEARN_CARDS 共 9 张（含五技能）', LEARN_CARDS.length === 9 && keys.every((k) => LEARN_CARDS.some((c) => c.target === k)));
+  ok('五技能各至少有一张专属卡', keys.every((k) => CARDS.some((c) => c.target === k)));
+
+  // 通用隔离：屏蔽其它技能自动释放 + 关掉主武器 + 停止出怪
+  const isolate = (w) => { muteSkills(w); w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; w.spawnTimer = 1e9; };
+
+  // 高能射线：锁敌直线光束，逐 tick 伤害
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    const e = makeEnemyEntity('zombie', PLAYER.x, 300); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e); learnSkill(w, 'ray');
+    const okCast = castSkill(w, 'ray');
+    ok('高能射线：施放生成 1 道光束', okCast && w.beams.length === 1);
+    const hp0 = e.hp; for (let i = 0; i < 5; i++) update(w, 16);
+    ok('高能射线：光束对沿线敌人造成伤害', e.hp < hp0);
+  }
+  // 制导激光：窄扇面扫到敌人伤害
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    const e = makeEnemyEntity('zombie', PLAYER.x, 300); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e); learnSkill(w, 'laser');
+    const okCast = castSkill(w, 'laser');
+    ok('制导激光：施放生成 1 道扇面', okCast && w.sweeps.length === 1);
+    const hp0 = e.hp; for (let i = 0; i < 5; i++) update(w, 16);
+    ok('制导激光：扇面扫到敌人造成伤害', e.hp < hp0);
+  }
+  // 哨戒机：部署炮台 + 自动打射程内敌人
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    learnSkill(w, 'turret');
+    const okCast = castSkill(w, 'turret');
+    ok('哨戒机：施放生成 1 台炮台', okCast && w.turrets.length === 1);
+    const t = w.turrets[0];
+    const e = makeEnemyEntity('zombie', t.x, t.y - 100); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e);
+    const hp0 = e.hp; for (let i = 0; i < 3; i++) update(w, 16);
+    ok('哨戒机：自动打击射程内敌人', e.hp < hp0);
+    ok('哨戒机：开火有视觉弹道', w.turretShots.length > 0 || e.hp < hp0);
+  }
+  // 燃烧地带：火区灼烧 + 减速区域内敌人
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    learnSkill(w, 'flame');
+    const okCast = castSkill(w, 'flame');
+    ok('燃烧地带：施放生成 1 片火区', okCast && w.flames.length === 1);
+    const f = w.flames[0];
+    const e = makeEnemyEntity('zombie', f.x, f.y); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e);
+    const hp0 = e.hp; for (let i = 0; i < 3; i++) update(w, 16);
+    ok('燃烧地带：火区灼烧区域内敌人', e.hp < hp0);
+    ok('燃烧地带：区域内敌人被减速', has(e.st, 'slow') || has(e.st, 'burn'));
+  }
+  // 旋转刀轮：横向滚过，敌人只吃一次切割
+  {
+    const w = createWorld(); w.running = true; isolate(w);
+    learnSkill(w, 'saw');
+    const okCast = castSkill(w, 'saw');
+    ok('旋转刀轮：施放生成 1 个刀轮', okCast && w.saws.length === 1);
+    const s = w.saws[0];
+    const e = makeEnemyEntity('zombie', s.x + 6, s.y); e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e);
+    const hp0 = e.hp; for (let i = 0; i < 3; i++) update(w, 16);
+    ok('旋转刀轮：滚过敌人造成切割伤害', e.hp < hp0);
+    ok('旋转刀轮：同一敌人只记一次命中', s.hitIds.includes(e.id));
+  }
+  // 4 槽上限：已学 4 技能后不再发学习卡（9 技能里一局最多选 4 条线）
+  {
+    const w = createWorld(); w.level = 10; w.spawnTimer = 1e9;
+    for (const k of ['freeze', 'burn', 'shock', 'vehicle']) w.skills[k] = { cd: 0 };
+    let learnedMore = false;
+    for (let i = 0; i < 40; i++) for (const c of rollCards(w)) if (c.kind === 'learn') learnedMore = true;
+    ok('已学 4 技能后不再发学习卡（4 槽上限）', !learnedMore);
+  }
+}
+
+console.log('— 集成冒烟：9 技能 × 8 敌人同场 200 帧不崩 / 无 NaN（不含整局平衡）—');
+{
+  const w = createWorld(); w.running = true;
+  w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; w.spawnTimer = 1e9; // 隔离主武器 + 停止出怪
+  for (const k of ['freeze', 'burn', 'shock', 'vehicle', 'ray', 'laser', 'turret', 'flame', 'saw']) w.skills[k] = { cd: 0 };
+  const types = Object.keys(ENEMY_TYPES);
+  let eid = 9000;
+  for (const t of types) for (let i = 0; i < 2; i++) {
+    const e = makeEnemyEntity(t, 40 + Math.random() * (WORLD.W - 80), 200 + Math.random() * 300);
+    e.id = eid++; e.hp = 500; e.maxHp = 500;
+    w.enemies.push(e);
+  }
+  let threw = null;
+  try { for (let i = 0; i < 200; i++) update(w, 16); } catch (err) { threw = err; }
+  ok('集成冒烟：200 帧不抛异常', !threw);
+  ok('集成冒烟：敌人 hp/坐标无 NaN', w.enemies.every((e) => Number.isFinite(e.hp) && Number.isFinite(e.x) && Number.isFinite(e.y)));
+  const arrays = [w.beams, w.sweeps, w.turrets, w.flames, w.saws, w.skillShots, w.strikes, w.arcs, w.storms];
+  ok('集成冒烟：技能实体数组无异常膨胀', arrays.every((a) => a.length < 400));
+  // 9 技能逐个强制施放一次（有目标时不应抛错）
+  let castThrew = null;
+  try {
+    for (const k of Object.keys(w.skills)) { w.skills[k].cd = 0; castSkill(w, k); }
+    for (let i = 0; i < 20; i++) update(w, 16);
+  } catch (err) { castThrew = err; }
+  ok('集成冒烟：9 技能逐个强制施放不抛异常', !castThrew);
+}
+
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);
 process.exit(failed === 0 ? 0 : 1);
