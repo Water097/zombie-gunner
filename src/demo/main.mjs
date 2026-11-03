@@ -340,16 +340,16 @@ function drawVehicles() {
   for (const v of world.vehicles) {
     if (v.ramp > 0) continue; // 还没进场
     const a = Math.min(1, v.life / 400);
-    // 模型尺寸（重型放大）与碾压判定框分开：2026-11-03 起重型只放大模型，判定不放大
-    const w = v.visW || v.w, h = v.visH || v.h;
+    // 判定框 = 模型尺寸（重型车物理一致地一起放大）
+    const w = v.w, h = v.h;
     const x = v.x - w / 2, y = v.y - h / 2;
     ctx.globalAlpha = 0.14 * a;
     ctx.fillStyle = v.color;
     roundRect(x, y, w, h, 6); ctx.fill();
-    // 碾压判定描边（用真实判定尺寸 v.w × v.h，重型车比模型小一圈——玩家能看出"范围没变"）
+    // 碾压判定描边（判定 = 模型，物理一致）
     ctx.globalAlpha = 0.55 * a;
     ctx.strokeStyle = '#e9c46a'; ctx.lineWidth = 1.2;
-    roundRect(v.x - v.w / 2, v.y - v.h / 2, v.w, v.h, 4); ctx.stroke();
+    roundRect(x, y, w, h, 6); ctx.stroke();
     // 尾尘（车后拖一条扬尘）
     ctx.globalAlpha = 0.22 * a;
     ctx.fillStyle = '#c9c2a8';

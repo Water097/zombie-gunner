@@ -17,8 +17,12 @@
 Demo 是 ES module，**必须走 http 服务**（不能双击 `index.html`）：
 
 ```bash
-python3 -m http.server 8123      # 然后打开 http://localhost:8123
+node serve.mjs        # 推荐：自带 no-store，改完刷新即生效 → http://localhost:8123
+node serve.mjs 8124   # 端口被占时换一个
 ```
+
+> ⚠️ 别用 `python3 -m http.server`：它不发缓存头，浏览器会按 URL 缓存 `.mjs` 模块，
+> 出现「改了代码、刷新了、看到的还是旧版本」（排查起来非常费时间，已踩过两次）。
 
 自测与平衡模拟（纯 Node，不需要浏览器）：
 

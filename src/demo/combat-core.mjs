@@ -70,13 +70,24 @@ export const SKILLS = {
   freeze: {
     name: '干冰', key: '1', color: '#5ad1ff', cooldownMs: 8000,
     speed: 560, pierce: true, explodeR: 0, radius: 6, knock: 0,
-    hit: (e, m) => apply(e.st, 'freeze', 1, 2500 + m.freezeDurBonus, { sourceId: 'skill-freeze', sourceLevel: 1, displaceType: 'normal' }),
+    // ⚠️ 临时基准值：直接命中伤害。2026-11-03 补——原先干冰弹只有冻结没有伤害，
+    // 伤害全靠状态，与 02 册"伤害 299 / 溅射 249"的差太远（那组是局外满级值，Demo 另定）
+    dmg: 34,
+    hit: (e, m, world) => {
+      if (world) dealDamage(world, e, SKILLS.freeze.dmg * m.freezeDmgMul, 'freeze');
+      apply(e.st, 'freeze', 1, 2500 + m.freezeDurBonus, { sourceId: 'skill-freeze', sourceLevel: 1, displaceType: 'normal' });
+    },
   },
   burn: {
     name: '温压', key: '2', color: '#ff7a3c', cooldownMs: 9000,
     speed: 480, pierce: false, explodeR: 95, radius: 7, knock: 25, // 击退由 60 下调：原值过强
-    hit: (e, m) => apply(e.st, 'burn', 18 * m.burnDmgMul, 3000, { sourceId: 'skill-burn', sourceLevel: 1, displaceType: 'normal' }),
-    explode: (e, m) => {
+    // ⚠️ 临时基准值：爆炸直接伤害（2026-11-03 补，原先温压只有灼烧 DoT、没有直接伤害）
+    dmg: 46,
+    // 温压是"命中即爆炸"：伤害与状态统一在 explode 里结算，
+    // 否则命中目标会先吃一次 hit 伤害、再被 explode 覆盖一次，同一个目标吃两遍。
+    hit: () => {},
+    explode: (e, m, world) => {
+      if (world) dealDamage(world, e, SKILLS.burn.dmg * m.burnHitMul, 'burn');
       apply(e.st, 'burn', 18 * m.burnDmgMul, 3000, { sourceId: 'skill-burn', sourceLevel: 1, displaceType: 'normal' });
       apply(e.st, 'knock', m.burnKnock, 0, { sourceId: 'skill-burn', sourceLevel: 1, displaceType: 'normal' }); // 普通位移，装甲不免疫
     },
@@ -106,10 +117,10 @@ export const SKILLS = {
     cooldownMs: 17400,
     dmg: 17,            // 单段冲撞伤害（02 册基础值）
     speed: 168,         // 行进速度 px/s（420 → 210 → 168：2026-11-02 两次下调，第二次再慢 20%）
-    bodyW: 34,          // 车身宽（判定用，重型也不变——范围属性极强，不给）
+    bodyW: 34,          // 车身宽（普通车）
     bodyH: 52,          // 车身高
-    visHeavyW: 52,      // 重型装甲车（⑥ 质变卡）：**只放大模型**，判定仍是 bodyW/bodyH
-    visHeavyH: 78,
+    bodyHeavyW: 52,     // 重型装甲车（⑥ 质变卡）：模型放大，**判定同步放大**（物理一致）
+    bodyHeavyH: 78,     //   放大幅度 +18/+26px（面积 ×2.3），远小于旧设计的"范围 +80%"
     heavySpeedMul: 0.8, // 重型减速 20%（代价），伤害在 vehicleHit 里 ×1.8（收益）
     hitIntervalMs: 100, // 多段伤害间隔
     knock: 25,          // 撞击击退距离（守线杠杆，每车每目标只结算一次）
@@ -151,7 +162,11 @@ function defaultMods() {
     pierceBonus: 0,       // 穿透加值
     spreadLanes: 0,       // 分裂子弹层数 a（散射弹道，上限 3）
     doubleShot: 0,        // 连发层数 b（同向多发，上限 3）
+    freezeDmgMul: 1,      // 干冰弹直接伤害倍率（冰锥强化）
+    freezeCount: 0,       // 干冰弹每次多发数（三连冰弹）
     freezeDurBonus: 0,    // 冻结时长加值 ms
+    burnHitMul: 1,        // 温压弹爆炸直接伤害倍率（高爆装药）
+    burnCount: 0,         // 温压弹每次多发数（双联装填）
     burnRadiusMul: 1,     // 温压爆炸半径倍率
     burnDmgMul: 1,        // 灼烧伤害倍率
     burnKnock: 25,        // 温压击退距离
@@ -281,7 +296,7 @@ function spawnEnemy(world, typeKey) {
   // 2026-11-02「加大密集程度」的配套：出怪数提升约 1.6 倍后，若单体照旧会把总压力乘成 1.7 倍，
   // 游戏直接从"偶尔翻车"变"地狱"。这里把单体血量/攻击同比例下调（**更多但更软**），
   // 保留尸群的密集观感与压迫感，但总压力只微增。
-  const DENSITY_COMP = 0.72;
+  const DENSITY_COMP = 0.80;
   const hpScale = (1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45) * DENSITY_COMP;  // 第20波 ≈ 2.0×
   const spdScale = Math.min(1.5, 1 + (wv - 1) * 0.025);
   const atkScale = (1 + (wv - 1) * 0.06) * DENSITY_COMP;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
@@ -322,7 +337,7 @@ function dealDamage(world, enemy, raw, source = 'weapon') {
   enemy.hitFlash = 90;
   if (gate > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×3  ${Math.round(dmg)}`, '#ff4d4d');
   else if (cond.tag) addFloater(world, enemy.x, enemy.y - enemy.radius, `${cond.tag} ${Math.round(dmg)}`, cond.color);
-  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : source === 'vehicle' ? '#a8d08d' : '#ffffff');
+  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : source === 'vehicle' ? '#a8d08d' : source === 'freeze' ? '#8ce6ff' : '#ffffff');
   if (enemy.hp <= 0) killEnemy(world, enemy);
 }
 
@@ -630,23 +645,20 @@ function castVehicle(world) {
   const m = world.mods, sk = SKILLS.vehicle;
   const count = 1 + Math.round(m.vehicleCount);
   const heavy = !!m.vehicleHeavy;
-  // 判定几何永远是普通车身（2026-11-03：重型只放大模型，**不放大攻击范围**）
-  const w = sk.bodyW;
-  const h = sk.bodyH;
-  const visW = heavy ? sk.visHeavyW : sk.bodyW;
-  const visH = heavy ? sk.visHeavyH : sk.bodyH;
+  // 判定几何 = 模型尺寸（2026-11-03 用户拍板：模型变大碾压范围就该跟着变，物理一致；
+  // 旧设计直接"范围 +80%"才是超模的原因，现在只 +18/+26px）
+  const w = heavy ? sk.bodyHeavyW : sk.bodyW;
+  const h = heavy ? sk.bodyHeavyH : sk.bodyH;
   let rampAcc = 0;
   for (let i = 0; i < count; i++) {
     // 2026-11-03 用户要求：多车不再横排等距出发，改为**随机车道 + 随机发车间隔**
-    const x = Math.max(visW * 0.5, Math.min(WORLD.W - visW * 0.5, visW * 0.5 + Math.random() * (WORLD.W - visW)));
+    const x = Math.max(w * 0.5, Math.min(WORLD.W - w * 0.5, w * 0.5 + Math.random() * (WORLD.W - w)));
     if (i > 0) rampAcc += 140 + Math.random() * 380; // 相邻两车 140~520ms，不挨着出发
     world.vehicles.push({
       x,
       y: world.player.y + 30,
       w,
       h,
-      visW,
-      visH,
       vy: -sk.speed * (heavy ? sk.heavySpeedMul : 1),
       life: sk.lifeMs / (heavy ? sk.heavySpeedMul : 1), // 降速后同步延长存在时间，保证走完全程
       ramp: rampAcc,       // 随机发车间隔
@@ -801,15 +813,21 @@ export function castSkill(world, id) {
   // 自动瞄准：取射程内最近敌人；无目标则朝正上方（避免空放）
   const tgt = acquireTarget(world) || { x: pet.x, y: 0 };
   const ang = Math.atan2(tgt.y - pet.y, tgt.x - pet.x);
-  world.skillShots.push({
-    id, color: sk.color,
-    x: pet.x + Math.cos(ang) * 14, y: pet.y + Math.sin(ang) * 14,
-    vx: Math.cos(ang) * sk.speed, vy: Math.sin(ang) * sk.speed,
-    pierce: sk.pierce,
-    explodeR: sk.explodeR * m.burnRadiusMul,
-    radius: sk.radius, life: 2000, dead: false,
-    hitIds: [], // 穿透弹每帧都会与同一敌人重叠，靠它保证"每个敌人只生效一次"
-  });
+  // 数量卡（2026-11-03）：干冰/温压可一次多发，微散射角避免完全重叠
+  const n = 1 + (id === 'freeze' ? m.freezeCount : id === 'burn' ? m.burnCount : 0);
+  const STEP_ANG = 0.10; // ≈6°
+  for (let i = 0; i < n; i++) {
+    const a2 = ang + (i - (n - 1) / 2) * STEP_ANG;
+    world.skillShots.push({
+      id, color: sk.color,
+      x: pet.x + Math.cos(a2) * (14 + i * 6), y: pet.y + Math.sin(a2) * (14 + i * 6),
+      vx: Math.cos(a2) * sk.speed, vy: Math.sin(a2) * sk.speed,
+      pierce: sk.pierce,
+      explodeR: sk.explodeR * m.burnRadiusMul,
+      radius: sk.radius, life: 2000, dead: false,
+      hitIds: [], // 穿透弹每帧都会与同一敌人重叠，靠它保证"每个敌人只生效一次"
+    });
+  }
   world.petFlash = 320; // 机器人出手闪光
   slot.cd = sk.cooldownMs * m.skillCdMul[id];
   return true;
@@ -824,7 +842,7 @@ function explodeSkill(world, s) {
   for (const e of world.enemies) {
     if (!e.alive) continue;
     const rr = s.explodeR + e.radius;
-    if (dist2(s.x, s.y, e.x, e.y) <= rr * rr) SKILLS[s.id].explode(e, world.mods);
+    if (dist2(s.x, s.y, e.x, e.y) <= rr * rr) SKILLS[s.id].explode(e, world.mods, world);
   }
   addRing(world, s.x, s.y, s.explodeR, s.color);
   for (let i = 0; i < 14; i++) {
@@ -990,7 +1008,7 @@ export function update(world, dtMs) {
       if (s.hitIds.includes(e.id)) continue; // 已命中过，穿透弹不重复生效
       const rr = e.radius + s.radius;
       if (dist2(s.x, s.y, e.x, e.y) <= rr * rr) {
-        SKILLS[s.id].hit(e, m);
+        SKILLS[s.id].hit(e, m, world);
         s.hitIds.push(e.id);
         if (!s.pierce) { explodeSkill(world, s); s.dead = true; break; }
       }

@@ -843,7 +843,7 @@ console.log('— 定制模式（自选海克斯，测试 build 用）—');
   ok('takeCard 仍遵守 3 层上限', w4.mods.spreadLanes === 3 && w4.cardStacks['bullet-spread'] === 3);
 }
 
-console.log('— 装甲车：随机车道 / 随机发车间隔 / 重型不换范围（2026-11-03）—');
+console.log('— 装甲车：随机车道 / 随机发车间隔 / 重型随模型放大（2026-11-03）—');
 {
   const stopFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
   // 多车车道随机：多次施放取样，应出现明显不同的 x
@@ -874,8 +874,9 @@ console.log('— 装甲车：随机车道 / 随机发车间隔 / 重型不换范
     w.mods.vehicleHeavy = 1;
     castSkill(w, 'vehicle');
     const v = w.vehicles[0];
-    ok('重型：判定仍是 34×52（范围不放大）', v.w === SKILLS.vehicle.bodyW && v.h === SKILLS.vehicle.bodyH);
-    ok('重型：模型放大到 52×78（只是看着大）', v.visW === 52 && v.visH === 78);
+    ok('重型：模型与判定一起放大（物理一致）', v.w === SKILLS.vehicle.bodyHeavyW && v.h === SKILLS.vehicle.bodyHeavyH);
+    ok('重型：放大幅度只有几十 px（34→52 / 52→78，不是旧设计的范围 +80%）',
+      v.w - SKILLS.vehicle.bodyW === 18 && v.h - SKILLS.vehicle.bodyH === 26);
     ok('重型：行进速度 ×0.8', Math.abs(Math.abs(v.vy) - SKILLS.vehicle.speed * 0.8) < 1e-6);
   }
   // 重型伤害 ×1.8（对付代价）
@@ -890,6 +891,92 @@ console.log('— 装甲车：随机车道 / 随机发车间隔 / 重型不换范
     w.vehicles[0].y = 480; // 直接把车挪到目标上方一个身位（省掉 30 帧车程，且不越过防线）
     update(w, 16);
     ok('重型：单段伤害 17×1.8 = 30.6', Math.round((9999 - e.hp) * 100) / 100 === 30.6);
+  }
+}
+
+console.log('— 技能基础属性：直接伤害 / 数量 / 冷却（2026-11-03 补齐）—');
+{
+  const noFire = (w) => { w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; };
+  const stubEnemy = (w, id, gap = 200) => {
+    const e = makeEnemyEntity('zombie', w.player.x, w.player.y - gap);
+    e.id = id; e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+    w.enemies.push(e); return e;
+  };
+  const dmgOf = (e) => Math.round((9999 - e.hp) * 100) / 100;
+
+  // 干冰：原先只有冻结、没有伤害 → 现在命中造成直接伤害
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const e = stubEnemy(w, 901);
+    learnSkill(w, 'freeze');
+    w.skills.freeze.cd = 0;
+    castSkill(w, 'freeze');
+    for (let i = 0; i < 45; i++) update(w, 16);
+    ok('干冰：命中直接伤害 34', dmgOf(e) === 34);
+    ok('干冰：同时施加冻结', has(e.st, 'freeze'));
+  }
+  // 干冰伤害卡 +60%
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const e = stubEnemy(w, 902);
+    learnSkill(w, 'freeze'); w.skills.freeze.cd = 0;
+    CARDS.find((c) => c.id === 'freeze-dmg').apply(w.mods);
+    castSkill(w, 'freeze');
+    for (let i = 0; i < 45; i++) update(w, 16);
+    ok('冰锥强化：34×1.6 = 54.4', dmgOf(e) === 54.4);
+  }
+  // 干冰数量卡：一次射 2 发
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    stubEnemy(w, 903);
+    learnSkill(w, 'freeze'); w.skills.freeze.cd = 0;
+    CARDS.find((c) => c.id === 'freeze-count').apply(w.mods);
+    castSkill(w, 'freeze');
+    ok('三连冰弹：一次射出 2 发弹道', w.skillShots.filter((x) => x.id === 'freeze').length === 2);
+  }
+  // 温压：命中即爆炸，同一个目标只结算一次直接伤害
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const e = stubEnemy(w, 904);
+    learnSkill(w, 'burn'); w.skills.burn.cd = 0;
+    castSkill(w, 'burn');
+    for (let i = 0; i < 45; i++) update(w, 16);
+    ok('温压：爆炸直接伤害 46（不重复结算）', dmgOf(e) === 46);
+    ok('温压：同时施加灼烧', has(e.st, 'burn'));
+  }
+  // 温压伤害卡 +60%
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    const e = stubEnemy(w, 905);
+    learnSkill(w, 'burn'); w.skills.burn.cd = 0;
+    CARDS.find((c) => c.id === 'burn-hit').apply(w.mods);
+    castSkill(w, 'burn');
+    for (let i = 0; i < 45; i++) update(w, 16);
+    ok('高爆装药：46×1.6 = 73.6', dmgOf(e) === 73.6);
+  }
+  // 温压数量卡
+  {
+    const w = createWorld(); w.running = true; noFire(w); w.enemies.length = 0;
+    stubEnemy(w, 906);
+    learnSkill(w, 'burn'); w.skills.burn.cd = 0;
+    CARDS.find((c) => c.id === 'burn-count').apply(w.mods);
+    castSkill(w, 'burn');
+    ok('双联装填：一次射出 2 发弹道', w.skillShots.filter((x) => x.id === 'burn').length === 2);
+  }
+  // 冷却卡
+  {
+    const w = createWorld(); w.running = true;
+    CARDS.find((c) => c.id === 'burn-cd').apply(w.mods);
+    CARDS.find((c) => c.id === 'vehicle-cd').apply(w.mods);
+    ok('快速装填：温压 CD ×0.75', Math.abs(w.mods.skillCdMul.burn - 0.75) < 1e-9);
+    ok('引擎预热：装甲车 CD ×0.8', Math.abs(w.mods.skillCdMul.vehicle - 0.8) < 1e-9);
+  }
+  // B：范围卡降幅 +20%
+  {
+    const m = createWorld().mods;
+    CARDS.find((c) => c.id === 'burn-radius').apply(m);
+    CARDS.find((c) => c.id === 'shock-area').apply(m);
+    ok('范围卡降为 +20%（温压半径 / 电磁感电范围）', Math.abs(m.burnRadiusMul - 1.2) < 1e-9 && Math.abs(m.shockRadiusMul - 1.2) < 1e-9);
   }
 }
 
