@@ -6,7 +6,7 @@
 
 import {
   createWorld, update, castSkill, chooseCard, takeCard, magSizeOf, petPos, CARDS,
-  PLAYER, ENEMY_TYPES, FORTRESS, SKILLS, bulletsPerShot, pelletFactor,
+  PLAYER, ENEMY_TYPES, FORTRESS, SKILLS, WORLD, bulletsPerShot, pelletFactor, WAVE_SCRIPT,
 } from './combat-core.mjs';
 import { LEARN_CARDS, xpForLevel, rollCards } from './cards.mjs';
 import { makeEnemy, apply, has, read } from '../status/status-system.mjs';
@@ -18,7 +18,7 @@ function ok(name, cond) {
 }
 function makeEnemyEntity(typeKey, x, y) {
   const t = ENEMY_TYPES[typeKey];
-  return { id: 1, type: typeKey, ...t, x, y, hp: t.hp, maxHp: t.hp, st: makeEnemy(t.targetType), alive: true, hitFlash: 0, attacking: false, attackTimer: 0, attackFlash: 0 };
+  return { id: 1, type: typeKey, ...t, x, y, hp: t.hp, maxHp: t.hp, st: makeEnemy(t.targetType), alive: true, hitFlash: 0, attacking: false, attackTimer: 0, attackFlash: 0, splitChild: false, standoffY: t.standoff ? Math.round(WORLD.H * t.standoffFrac) : 0 };
 }
 // 供碰撞用的子弹（内核里子弹带穿透与命中去重，测试需同构）
 function makeBullet(x, y, opts = {}) {
@@ -978,6 +978,103 @@ console.log('— 技能基础属性：直接伤害 / 数量 / 冷却（2026-11-0
     CARDS.find((c) => c.id === 'shock-area').apply(m);
     ok('范围卡降为 +20%（温压半径 / 电磁感电范围）', Math.abs(m.burnRadiusMul - 1.2) < 1e-9 && Math.abs(m.shockRadiusMul - 1.2) < 1e-9);
   }
+}
+
+console.log('— 敌人类型：八种齐全 + 行为标记（2026-11-03 补齐 5 种）—');
+{
+  const keys = Object.keys(ENEMY_TYPES);
+  ok('敌人类型共 8 种（普通/疾行/装甲/蜂群/远程/自爆/飞行/分裂）', keys.length === 8);
+  ok('八种：含 swarm/ranged/bomber/flyer/splitter', ['swarm','ranged','bomber','flyer','splitter'].every((k) => keys.includes(k)));
+  ok('蜂群标记：swarm + 死亡不产尸爆', ENEMY_TYPES.swarm.swarm === true && ENEMY_TYPES.swarm.noCorpseBoom === true);
+  ok('远程兵标记：standoff + standoffFrac', ENEMY_TYPES.ranged.standoff === true && typeof ENEMY_TYPES.ranged.standoffFrac === 'number');
+  ok('自爆兵标记：bomber + boomDmg', ENEMY_TYPES.bomber.bomber === true && ENEMY_TYPES.bomber.boomDmg > 0);
+  ok('飞行兵标记：flyer + air', ENEMY_TYPES.flyer.flyer === true && ENEMY_TYPES.flyer.air === true);
+  ok('分裂兵标记：splitter', ENEMY_TYPES.splitter.splitter === true);
+}
+
+console.log('— 波次纪律：初版一局总阵容 = 5 种核心 + 每波 ≤5 种（2026-11-03 拍板）—');
+{
+  const CORE = ['zombie', 'runner', 'armored', 'bomber', 'ranged'];
+  const RESERVED = ['swarm', 'flyer', 'splitter']; // 留作后续章节，初版不进场
+  const waveTypes = (comp) => Object.keys(comp).filter((k) => (comp[k] || 0) > 0).length;
+  let maxTypes = 0; const seen = new Set(); let reservedLeak = false;
+  WAVE_SCRIPT.forEach((s) => {
+    maxTypes = Math.max(maxTypes, waveTypes(s.composition));
+    for (const k of Object.keys(s.composition)) {
+      if ((s.composition[k] || 0) > 0) {
+        if (RESERVED.includes(k)) reservedLeak = true;
+        seen.add(k);
+      }
+    }
+  });
+  ok('每波常规出怪类型 ≤5 种（关内只上 3-5 种）', maxTypes <= 5);
+  ok('初版总阵容恰好 5 种核心敌人（普通/疾行/装甲/自爆/远程）', seen.size === 5 && CORE.every((k) => seen.has(k)));
+  ok('蜂群/飞行/分裂不进初版阵容（留后续章节）', reservedLeak === false);
+}
+
+console.log('— 蜂群：极低血量即血条 + 抵线持续攻击 —');
+{
+  const w = createWorld(); w.running = true; muteSkills(w);
+  w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; // 隔离主武器
+  const e = makeEnemyEntity('swarm', 225, FORTRESS.attackLine); e.id = 1401; e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+  w.enemies.push(e);
+  update(w, 16);
+  ok('蜂群标记与死亡不产尸爆', e.swarm === true && e.noCorpseBoom === true);
+  ok('蜂群血量极低（数量即血条）', ENEMY_TYPES.swarm.hp <= 12);
+  ok('蜂群抵达防线转入攻击姿态', e.attacking === true);
+}
+
+console.log('— 远程兵：推进到 standoff 线停住并喷吐弹丸（不冲线）—');
+{
+  const w = createWorld(); w.running = true; muteSkills(w);
+  w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9; // 隔离主武器
+  const e = makeEnemyEntity('ranged', 225, ENEMY_TYPES.ranged.standoffFrac ? Math.round(WORLD.H * ENEMY_TYPES.ranged.standoffFrac) : 0);
+  e.id = 1101; e.speed = 0;
+  w.enemies.push(e);
+  const hp0 = w.fortressHp;
+  for (let i = 0; i < 320; i++) update(w, 16); // ≈5.1s：够首发射击 + 弹丸飞抵要塞
+  ok('远程兵停在 standoff 线（未冲到要塞线）', e.alive && e.y <= FORTRESS.attackLine - 100);
+  ok('远程兵向要塞喷吐弹丸（生成 enemyShots）', w.enemyShots.length > 0 || w.fortressHp < hp0);
+  ok('远程兵弹丸命中要塞造成伤害', w.fortressHp < hp0);
+}
+
+console.log('— 自爆兵：抵线即爆，大额要塞伤害后消失 —');
+{
+  const w = createWorld(); w.running = true; muteSkills(w);
+  w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9;
+  const e = makeEnemyEntity('bomber', 225, FORTRESS.attackLine); e.id = 1201; e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+  w.enemies.push(e);
+  const hp0 = w.fortressHp;
+  update(w, 16);
+  ok('自爆兵抵线引爆并消失', !e.alive && !w.enemies.includes(e));
+  ok('自爆对要塞造成大额伤害（boomDmg 随波缩放）', w.fortressHp <= hp0 - 20);
+}
+
+console.log('— 飞行兵：空中直线飞向要塞，抵达持续攻击 —');
+{
+  const w = createWorld(); w.running = true; muteSkills(w);
+  w.player.ammo = 0; w.player.reloading = true; w.player.reloadTimer = 1e9;
+  const e = makeEnemyEntity('flyer', 225, FORTRESS.attackLine); e.id = 1301; e.hp = 9999; e.maxHp = 9999; e.speed = 0;
+  w.enemies.push(e);
+  const hp0 = w.fortressHp;
+  for (let i = 0; i < 70; i++) update(w, 16); // ≈1.1s：过半拍攻击延迟
+  ok('飞行兵是空中单位（air=true）', e.air === true);
+  ok('飞行兵抵达防线转入攻击姿态（普通攻击，非自爆）', e.attacking === true);
+  ok('飞行兵持续啃要塞', w.fortressHp < hp0);
+}
+
+console.log('— 分裂兵：死亡裂成 2 只子代，子代不再分裂（防递归）—');
+{
+  const w = createWorld(); w.running = true; muteSkills(w);
+  const e = makeEnemyEntity('splitter', 225, 500); const fullMaxHp = e.maxHp; e.id = 1001; e.hp = 5; e.maxHp = 5; e.speed = 0;
+  w.enemies.push(e);
+  w.bullets.push(makeBullet(225, 500)); // 一发打死分裂兵
+  update(w, 16);
+  const kids = w.enemies.filter((x) => x.splitChild);
+  ok('分裂兵死亡裂成 2 只子代', kids.length === 2);
+  ok('子代标记 splitChild（不再分裂，防递归雪球）', kids.every((k) => k.splitChild === true));
+  ok('子代血量更低（约为正常分裂兵 0.4×）', kids.every((k) => k.hp > 0 && k.hp < fullMaxHp));
+  ok('原分裂兵已移除', !w.enemies.includes(e));
 }
 
 console.log(`\n结果：${passed} 通过 / ${failed} 失败`);

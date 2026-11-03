@@ -21,29 +21,34 @@ const RUNS_PER_STRATEGY = (() => {
 })();
 
 // ── 选卡策略 ──
-// smart：专精流——武器伤害为主轴，专注冰系一条线（干冰弹→极寒延长→制冷回路→破冰），
-//        有对应放大器就吃。代表"正确选择海克斯"的玩家。
+// smart：懂版本的玩家——学全 4 个技能（干冰/温压/电磁/装甲车），把放大器铺满。
+//   关键修正（2026-11-03）：旧 priority 完全不含装甲车体系（11 张）与电磁大部分卡，
+//   导致 smart 把资源压在干冰（对装甲 ×3 门禁失效）而放弃最强守线，反而被 random 的
+//   "随手拿装甲车"地板反超。现把装甲车（Universal 守线，含装甲）/ 电磁 / 温压放大器
+//   一并纳入，重建"会选卡"对"乱选"的领先。
 const SMART_PRIORITY = [
-  'learn-freeze',                        // 先学一个技能：没有 AOE 的纯子弹 build 在密集尸群下必死
-  'learn-burn',                          // 第二个技能：密度加大后单线专精清群不够，会玩的人会补 AOE
-  'bullet-dmg', 'bullet-dmg',           // 伤害主轴（允许重复优先）
-  'bullet-spread', 'bullet-double',     // 弹道卡（06册）：清群核心
-  'bullet-split',                        // 子弹属性卡（06册 §3.2.1）：分裂先立，修饰卡才有意义
-  'bullet-explode',                      // 爆炸弹头：命中点 AOE
-  'icebreak',                            // 放大器直接跟线
-  'bullet-sub-boom', 'bullet-sub-dmg',   // 子子弹修饰（要有分裂才进池，排后面）
-  'bullet-explode-range',
-  'freeze-dur', 'freeze-cd',
-  'bullet-fire',                         // 火：单体 DoT，最弱的一档常驻
-  'bullet-rate', 'bullet-pierce',
-  'combust', 'conductor',                 // 其他放大器（拿了也不亏）
-  'burn-dmg', 'shock-dur', 'burn-radius',
+  // 学全 4 技能：开局无技能先拿工具；装甲车是唯一对所有敌种（含装甲）生效的守线
+  'learn-freeze', 'learn-burn', 'learn-vehicle', 'learn-shock',
+  // 主武器伤害主轴（可重复优先，清群与补刀的基础）
+  'bullet-dmg', 'bullet-dmg', 'bullet-dmg',
+  // 装甲车：最强守线，优先补冷却/次数/重型，再伤害/击退/易伤/减速
+  'vehicle-cd', 'vehicle-count', 'vehicle-heavy', 'vehicle-dmg', 'vehicle-knock', 'vehicle-vuln', 'vehicle-slow',
+  // 干冰：AOE 减速（对软敌），补冷却/时长/伤害/数量 + 破冰放大器
+  'freeze-cd', 'freeze-dur', 'freeze-dmg', 'freeze-count', 'icebreak',
+  // 弹道清群（06 册）：散射/连发先立，分裂/爆炸/子子弹修饰随后
+  'bullet-spread', 'bullet-double', 'bullet-split', 'bullet-explode', 'bullet-explode-range', 'bullet-sub-boom', 'bullet-sub-dmg',
+  // 温压：AOE 伤害，补齐直接伤害/冷却/数量 + 燃料增量 + 助燃
+  'burn-dmg', 'burn-hit', 'burn-cd', 'burn-count', 'burn-radius', 'combust',
+  // 电磁：闪电伤害 + 感电，补伤害/冷却/数量/范围/时长/质变 + 导电体
+  'shock-dmg', 'shock-cd', 'shock-count', 'shock-area', 'shock-dur', 'shock-arc', 'shock-storm', 'conductor',
+  // 子弹特性 / 射速 / 穿透 / 代价卡（兜底）
+  'bullet-fire', 'bullet-rate', 'bullet-pierce',
   'highpressure', 'rapidlearn', 'lightweight',
 ];
 function pickSmart(world) {
   const cards = world.pendingCards;
   const learn = cards.find((c) => c.kind === 'learn');
-  if (learn && Object.keys(world.skills).length < 3) return cards.indexOf(learn);
+  if (learn && Object.keys(world.skills).length < 4) return cards.indexOf(learn);
   for (const id of SMART_PRIORITY) {
     const i = cards.findIndex((c) => c.id === id);
     if (i >= 0) return i;

@@ -162,6 +162,7 @@ function render() {
   drawArcs();
   drawVehicles();
   drawEnemies();
+  drawEnemyShots();
   drawSkillShots();
   drawBullets();
   drawParticles();
@@ -275,6 +276,67 @@ function drawPet() {
   ctx.beginPath(); ctx.arc(x + 5 + ex, y + ey, 2.6, 0, Math.PI * 2); ctx.fill();
 }
 
+// 敌人专属外形（2026-11-03 补齐 5 种新敌；原 3 种保留辨识度）。
+// 只画"身体"，状态环/血条/状态图标仍由 drawEnemies 在身体之上叠加。
+function drawEnemyBody(e, x, y, r) {
+  switch (e.type) {
+    case 'armored': { // 装甲尸车：方盒车体 + 高光（硬门禁对象，辨识度优先）
+      ctx.fillStyle = e.color;
+      ctx.fillRect(x - r, y - r * 0.82, r * 2, r * 1.64);
+      ctx.fillStyle = 'rgba(255,255,255,0.18)';
+      ctx.fillRect(x - r * 0.62, y - r * 0.55, r * 1.24, r * 0.5);
+      return;
+    }
+    case 'ranged': { // 远程尸：高瘦椭圆（站着喷吐，与近战区分）
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.ellipse(x, y, r * 0.72, r * 1.15, 0, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    case 'bomber': { // 自爆尸：圆肚 + 临线脉动内核心（危险信号）
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      const prox = Math.max(0, Math.min(1, (y - 360) / (FORTRESS.attackLine - 360)));
+      ctx.fillStyle = `rgba(255,232,120,${0.3 + prox * 0.55})`;
+      ctx.beginPath(); ctx.arc(x, y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    case 'flyer': { // 飞行尸：圆身 + 两侧翼三角（空中单位）
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(143,208,232,0.75)';
+      ctx.beginPath(); ctx.moveTo(x - r, y); ctx.lineTo(x - r - 11, y - 6); ctx.lineTo(x - r - 4, y + 6); ctx.closePath(); ctx.fill();
+      ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + r + 11, y - 6); ctx.lineTo(x + r + 4, y + 6); ctx.closePath(); ctx.fill();
+      return;
+    }
+    case 'splitter': { // 分裂尸：半透明 + 中缝（提示会裂）
+      ctx.globalAlpha = 0.8;
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = 'rgba(50,80,25,0.85)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.7, y); ctx.lineTo(x + r * 0.7, y); ctx.stroke();
+      return;
+    }
+    case 'swarm': { // 蜂群：极小的暗黄点（数量即血条）
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+    case 'runner': { // 疾行尸：圆身 + 速度 chevron（快）
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x - r * 0.6, y - 4); ctx.lineTo(x - r - 5, y); ctx.lineTo(x - r * 0.6, y + 4); ctx.stroke();
+      return;
+    }
+    default: { // 普通僵尸：圆身
+      ctx.fillStyle = e.color;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      return;
+    }
+  }
+}
+
 function drawEnemies() {
   for (const e of world.enemies) {
     const x = e.x, y = e.y, r = e.radius;
@@ -289,8 +351,7 @@ function drawEnemies() {
       ctx.strokeStyle = 'rgba(255,107,107,0.75)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke();
     }
-    ctx.fillStyle = e.color;
-    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    drawEnemyBody(e, x, y, r);
     if (e.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
     if (has(e.st, 'freeze')) { ctx.strokeStyle = '#5ad1ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
     else if (has(e.st, 'stun')) { ctx.strokeStyle = '#c77dff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
@@ -311,6 +372,17 @@ function drawStatusIcons(e, x0, y) {
   let x = x0;
   for (const [id, col] of STATUS_ICON) {
     if (has(e.st, id)) { ctx.fillStyle = col; ctx.fillRect(x, y, 7, 7); x += 9; }
+  }
+}
+
+function drawEnemyShots() {
+  // 远程尸喷吐的弹丸（打要塞）：暗紫发光小球，与玩家子弹橙黄区分
+  for (const s of world.enemyShots) {
+    if (s.dead) continue;
+    ctx.fillStyle = 'rgba(157,142,196,0.35)';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.radius + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#b9a8e0';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
   }
 }
 

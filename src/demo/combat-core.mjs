@@ -54,42 +54,58 @@ export function petPos(world) {
 
 // ── 敌人类型（对齐 14 册 targetType 与 04 册出怪纪律）──
 // 新增 atkDmg / atkIntervalMs：抵达要塞后的攻击力与攻击频率
+// 行为标记（05 册八种＋蜂群）：
+//   swarm     蜂群：极小成片、横向铺开、数量即血条；死亡不产尸爆（锁死温压连锁反向超神）
+//   standoff  远程兵：推进到 standoffFrac·H 处停住，向要塞喷吐弹丸（不冲线）
+//   bomber    自爆兵：抵线即爆，造成大额要塞伤害后消失
+//   flyer     飞行兵：air=true，悬浮直线飞向要塞（Demo 内无地面阻挡，行为等同直线推进，仅渲染有翼）
+//   splitter  分裂兵：死亡裂成 2 只小兵，子代 splitChild=true 不再分裂（防递归）
 export const ENEMY_TYPES = {
   zombie:  { name: '普通僵尸', targetType: 'normal',  hp: 60,  speed: 14, radius: 16, color: '#7fb069', score: 60,  xp: 10, atkDmg: 4,  atkIntervalMs: 1500 },
   runner:  { name: '疾行尸',   targetType: 'normal',  hp: 40,  speed: 30, radius: 12, color: '#e9c46a', score: 45,  xp: 12, atkDmg: 3,  atkIntervalMs: 1200 },
   armored: { name: '装甲尸车', targetType: 'armored', hp: 300, speed: 10, radius: 24, color: '#577590', score: 200, xp: 40, atkDmg: 9, atkIntervalMs: 2000, vehicleLevel: 20 },
+  // ── 05 册八种：下列 5 种为 2026-11-03 补齐（数值阶段统一校准，当前为临时基准值）──
+  swarm:   { name: '蜂群',     targetType: 'normal',  hp: 9,   speed: 34, radius: 5,  color: '#c9a83a', score: 8,   xp: 5,  atkDmg: 2,  atkIntervalMs: 1500, swarm: true, noCorpseBoom: true },
+  ranged:  { name: '远程尸',   targetType: 'normal',  hp: 35,  speed: 16, radius: 13, color: '#9d8ec4', score: 70,  xp: 14, atkDmg: 5,  atkIntervalMs: 1800, standoff: true, standoffFrac: 0.34 },
+  bomber:  { name: '自爆尸',   targetType: 'normal',  hp: 30,  speed: 22, radius: 15, color: '#ff6b4a', score: 60,  xp: 10, atkDmg: 0,  atkIntervalMs: 0,    bomber: true, boomDmg: 40 },
+  flyer:   { name: '飞行尸',   targetType: 'normal',  hp: 28,  speed: 24, radius: 12, color: '#8fd0e8', score: 55,  xp: 12, atkDmg: 3,  atkIntervalMs: 1400, flyer: true, air: true },
+  splitter:{ name: '分裂尸',   targetType: 'normal',  hp: 70,  speed: 14, radius: 19, color: '#a8c66c', score: 90,  xp: 16, atkDmg: 4,  atkIntervalMs: 1500, splitter: true },
 };
 
 // ── 波次压力曲线（2026-11-03 实装，对齐 04 册 §三 职能表）──
 // 04 册那张 20 波职能表（起手/热身/引入/精英峰/上升/喘息×2/高压 16-18/清算/尸墙）一直没进 Demo，
-// 之前是匀速出怪 → 赢的局全程满血、零起伏。现在用现有 3 种敌人把它落成"密度峰谷 + 两次喘息"。
-// 设计纪律（04 册 §七）：以密度为主、血量为辅；逐波显式系数，不套公式。
-//   composition：zombie/runner/armored 权重（不需归一化，轮盘赌自动归一）
+// 之前是匀速出怪 → 赢的局全程满血、零起伏。现在落成"密度峰谷 + 两次喘息"。
+// 设计纪律（04 册 §七 + 用户 2026-11-03 拍板）：以密度为主、血量为辅；逐波显式系数，不套公式。
+//   **初版一局（20 波）总阵容上限 = 5 种**（普通·疾行·装甲·自爆·远程），非 8 种齐发；
+//   蜂群/飞行/分裂已定义并留作后续章节，本轮不进场。每波渐进引入、后期轮替，锚定 Build 维度：
+//     - 波 1-3 只普通+疾行（教学 / 快速兵）→ 波 4 引入自爆 → 波 9 引入远程+装甲（齐 5 种）
+//     - 波 8、14 两次喘息落潮；波 12/16/19 轮替时抽掉普通制造重甲压制感
+//   composition：各敌人权重（zombie/runner/armored/ranged/bomber，不需归一化，轮盘赌自动归一）
 //   batch：本批出怪只数；extraChance：本批额外 +1 只的概率（制造疏密抖动）
 //   interval：出怪间隔(ms)；name：职能标签（未来波次预告 UI 用）；breath：喘息波标记
-// 单体成长（hpScale/spdScale/atkScale，见 spawnEnemy）仍随波次连续抬升（"更多但更软"方向不变），
+// 单体成长（hpScale/spdScale/atkScale，见 makeEnemyEntity）仍随波次连续抬升（"更多但更软"方向不变），
 // 此处只塑密度骨架——密度峰谷 + 两次落潮，把"差点没守住"的紧张感做出来。
 export const WAVE_SCRIPT = [
-  { name: '起手',     composition: { zombie: 1.00, runner: 0.00, armored: 0.00 }, batch: 1, extraChance: 0.00, interval: 1100, breath: false }, // 1  教学：最稀，看清枪在打什么
-  { name: '热身',     composition: { zombie: 0.75, runner: 0.25, armored: 0.00 }, batch: 2, extraChance: 0.00, interval: 1000, breath: false }, // 2  密度缓升，出现快速兵
-  { name: '热身',     composition: { zombie: 0.65, runner: 0.35, armored: 0.00 }, batch: 2, extraChance: 0.20, interval: 950,  breath: false }, // 3  前 2-3 次升级，Build 有雏形
-  { name: '引入·装甲',composition: { zombie: 0.55, runner: 0.33, armored: 0.12 }, batch: 2, extraChance: 0.20, interval: 900,  breath: false }, // 4  第一次"防线会被突破"实感
-  { name: '精英峰',   composition: { zombie: 0.45, runner: 0.35, armored: 0.20 }, batch: 3, extraChance: 0.30, interval: 850,  breath: false }, // 5  第一个压力峰（密度略高于旧版同期）
-  { name: '上升',     composition: { zombie: 0.50, runner: 0.40, armored: 0.10 }, batch: 2, extraChance: 0.20, interval: 880,  breath: false }, // 6  密度爬坡
-  { name: '上升',     composition: { zombie: 0.43, runner: 0.45, armored: 0.12 }, batch: 3, extraChance: 0.30, interval: 820,  breath: false }, // 7  建立"越来越挤"预期
-  { name: '喘息',     composition: { zombie: 0.65, runner: 0.30, armored: 0.05 }, batch: 1, extraChance: 0.20, interval: 1200, breath: true  }, // 8  密度骤降（≈基线一半），让玩家松一口气
-  { name: '引入·装甲流',composition: { zombie: 0.40, runner: 0.40, armored: 0.20 }, batch: 3, extraChance: 0.30, interval: 820,  breath: false }, // 9  装甲比例抬升
-  { name: '精英峰',   composition: { zombie: 0.32, runner: 0.40, armored: 0.28 }, batch: 3, extraChance: 0.40, interval: 750,  breath: false }, // 10 中段大考
-  { name: '上升',     composition: { zombie: 0.33, runner: 0.42, armored: 0.25 }, batch: 3, extraChance: 0.40, interval: 760,  breath: false }, // 11 密度继续爬
-  { name: '上升',     composition: { zombie: 0.27, runner: 0.45, armored: 0.28 }, batch: 3, extraChance: 0.40, interval: 740,  breath: false }, // 12
-  { name: '上升',     composition: { zombie: 0.22, runner: 0.48, armored: 0.30 }, batch: 3, extraChance: 0.35, interval: 740,  breath: false }, // 13
-  { name: '喘息',     composition: { zombie: 0.50, runner: 0.40, armored: 0.10 }, batch: 2, extraChance: 0.20, interval: 1150, breath: true  }, // 14 第二次呼吸
-  { name: '精英峰',   composition: { zombie: 0.20, runner: 0.45, armored: 0.35 }, batch: 3, extraChance: 0.40, interval: 720,  breath: false }, // 15 终局前最后一道坎（略高于旧版同期）
-  { name: '高压',     composition: { zombie: 0.15, runner: 0.50, armored: 0.35 }, batch: 3, extraChance: 0.40, interval: 720,  breath: false }, // 16 满屏压力，密度回到旧版同期水平
-  { name: '高压',     composition: { zombie: 0.12, runner: 0.50, armored: 0.38 }, batch: 3, extraChance: 0.40, interval: 700,  breath: false }, // 17
-  { name: '高压',     composition: { zombie: 0.08, runner: 0.52, armored: 0.40 }, batch: 3, extraChance: 0.40, interval: 680,  breath: false }, // 18
-  { name: '清算',     composition: { zombie: 0.08, runner: 0.50, armored: 0.42 }, batch: 3, extraChance: 0.50, interval: 660,  breath: false }, // 19 全类型 + 高密度，爽感释放
-  { name: '尸墙',     composition: { zombie: 0.05, runner: 0.50, armored: 0.45 }, batch: 3, extraChance: 0.50, interval: 640,  breath: false }, // 20 最高密度收尾（≈旧版峰值，制造"撑住"感）
+  { name: '起手',     composition: { zombie: 1.00 },                                                            batch: 1, extraChance: 0.00, interval: 1100, breath: false }, // 1  教学：最稀，看清枪在打什么（1 种）
+  { name: '热身',     composition: { zombie: 0.75, runner: 0.25 },                                              batch: 2, extraChance: 0.00, interval: 1000, breath: false }, // 2  密度缓升，出现快速兵（2 种）
+  { name: '热身',     composition: { zombie: 0.65, runner: 0.35 },                                              batch: 2, extraChance: 0.20, interval: 950,  breath: false }, // 3  前 2-3 次升级，Build 有雏形（2 种）
+  { name: '引入·自爆',composition: { zombie: 0.55, runner: 0.30, bomber: 0.15 },                                batch: 2, extraChance: 0.20, interval: 900,  breath: false }, // 4  首次出现自爆兵（爆发/单体考验，3 种）
+  { name: '精英峰',   composition: { zombie: 0.45, runner: 0.35, bomber: 0.20 },                                batch: 3, extraChance: 0.30, interval: 850,  breath: false }, // 5  第一个压力峰（3 种）
+  { name: '上升',     composition: { zombie: 0.50, runner: 0.40, bomber: 0.10 },                                batch: 2, extraChance: 0.20, interval: 880,  breath: false }, // 6  密度爬坡（3 种）
+  { name: '上升',     composition: { zombie: 0.45, runner: 0.45, bomber: 0.10 },                                batch: 3, extraChance: 0.30, interval: 820,  breath: false }, // 7  建立"越来越挤"预期（3 种）
+  { name: '喘息',     composition: { zombie: 0.65, runner: 0.30 },                                              batch: 1, extraChance: 0.20, interval: 1200, breath: true  }, // 8  密度骤降（≈基线一半，2 种）
+  { name: '引入·远程/装甲',composition: { zombie: 0.40, runner: 0.30, bomber: 0.10, ranged: 0.12, armored: 0.08 }, batch: 3, extraChance: 0.30, interval: 820,  breath: false }, // 9  齐 5 种（上限），远程/装甲引入
+  { name: '精英峰',   composition: { zombie: 0.30, runner: 0.35, bomber: 0.10, ranged: 0.13, armored: 0.12 },     batch: 3, extraChance: 0.40, interval: 750,  breath: false }, // 10 中段大考（5 种）
+  { name: '上升',     composition: { zombie: 0.28, runner: 0.38, bomber: 0.12, ranged: 0.12, armored: 0.10 },     batch: 3, extraChance: 0.40, interval: 760,  breath: false }, // 11 密度继续爬（5 种）
+  { name: '轮替·装甲流',composition: { runner: 0.34, zombie: 0.16, bomber: 0.13, ranged: 0.15, armored: 0.22 }, batch: 3, extraChance: 0.40, interval: 740,  breath: false }, // 12 轮替：装甲温和抬升（5 种）
+  { name: '上升',     composition: { zombie: 0.30, runner: 0.35, bomber: 0.10, ranged: 0.15, armored: 0.10 },     batch: 3, extraChance: 0.40, interval: 740,  breath: false }, // 13 密度继续爬（5 种）
+  { name: '喘息',     composition: { zombie: 0.50, runner: 0.40 },                                              batch: 2, extraChance: 0.20, interval: 1150, breath: true  }, // 14 第二次呼吸（2 种）
+  { name: '高压',     composition: { zombie: 0.22, runner: 0.40, bomber: 0.13, ranged: 0.10, armored: 0.15 },     batch: 3, extraChance: 0.40, interval: 720,  breath: false }, // 15 终局前最后一道坎（5 种）
+  { name: '轮替·装甲流',composition: { runner: 0.36, zombie: 0.14, bomber: 0.12, ranged: 0.18, armored: 0.20 }, batch: 3, extraChance: 0.40, interval: 720,  breath: false }, // 16 轮替：装甲温和抬升（5 种）
+  { name: '高压',     composition: { zombie: 0.20, runner: 0.38, bomber: 0.12, ranged: 0.15, armored: 0.15 },     batch: 3, extraChance: 0.40, interval: 700,  breath: false }, // 17 满屏压力（5 种）
+  { name: '高压',     composition: { zombie: 0.15, runner: 0.40, bomber: 0.12, ranged: 0.18, armored: 0.15 },     batch: 3, extraChance: 0.40, interval: 700,  breath: false }, // 18 满屏压力（5 种）
+  { name: '清算',     composition: { runner: 0.33, zombie: 0.10, bomber: 0.15, ranged: 0.15, armored: 0.27 },     batch: 3, extraChance: 0.35, interval: 700,  breath: false }, // 19 清算前最后一道坎（5 种）
+  { name: '尸墙',     composition: { zombie: 0.12, runner: 0.40, bomber: 0.12, ranged: 0.16, armored: 0.20 },     batch: 3, extraChance: 0.35, interval: 680,  breath: false }, // 20 最高密度收尾（5 种）
 ];
 
 // 整体密度微调旋钮（不影响峰谷相对形状，只把所有波的间隔等比例缩放）：
@@ -259,6 +275,8 @@ export function createWorld() {
     arcs: [],     // 弹射电弧的视觉残留（落点 → 附近敌人的短折线）
     storms: [],   // 雷雨区（20 级雷暴）：{x,y,r,life,tick}，update 里持续落小闪电
     vehicles: [], // 装甲车实体：{x,y,r,vy,life,hitCd(每人冷却),firstHit,ramp}
+    enemyShots: [], // 远程兵喷吐的弹丸（打要塞）：{x,y,vx,vy,dmg,life,radius,color}
+    pendingEnemies: [], // 本帧新生成的敌人（分裂子代/蜂群），循环后再并入，避免边遍历边追加
     particles: [],
     floaters: [],
     rings: [],
@@ -292,6 +310,7 @@ export function createWorld() {
     wave: 1,
     waveName: '起手',
     waveBreath: false,
+    swarmQueued: 0, // 蜂群检查点波：进入该波时写入待投放数量，出怪循环消费一次后归零（05 册约束：只波 7/13/17）
     score: 0,
     killCount: 0,
   };
@@ -326,48 +345,84 @@ function addRing(world, x, y, maxR, color) {
   world.rings.push({ x, y, r: 8, maxR, life: 420, maxLife: 420, color });
 }
 
-function spawnEnemy(world, typeKey) {
-  const t = ENEMY_TYPES[typeKey];
-  const lane = 40 + Math.random() * (WORLD.W - 80);
-  // ── 波次缩放（压迫感核心旋钮）：血量/速度/攻击随波次成长，玩家输出必须跟上海克斯选择质量 ──
+// 波次缩放（压迫感核心旋钮）：血量/速度/攻击随波次成长，玩家输出必须跟上海克斯选择质量。
+// 抽成函数，供普通出怪 / 蜂群 / 分裂子代复用，避免缩放逻辑散落多处（重构点：2026-11-03 补齐 5 种敌人）。
+function waveScales(world) {
   const wv = world.wave;
   // 血量超线性：前期温和、第 10 波起陡增——混搭乱选的 DPS 跟不上，专精+放大器才行
   // 2026-11-02「加大密集程度」的配套：出怪数提升约 1.6 倍后，若单体照旧会把总压力乘成 1.7 倍，
   // 游戏直接从"偶尔翻车"变"地狱"。这里把单体血量/攻击同比例下调（**更多但更软**），
   // 保留尸群的密集观感与压迫感，但总压力只微增。
-  const DENSITY_COMP = 0.80;
+  const DENSITY_COMP = 0.74;
   const hpScale = (1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45) * DENSITY_COMP;  // 第20波 ≈ 2.0×
   const spdScale = Math.min(1.5, 1 + (wv - 1) * 0.025);
   const atkScale = (1 + (wv - 1) * 0.06) * DENSITY_COMP;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
-  world.enemies.push({
+  return { hpScale, spdScale, atkScale };
+}
+
+// 构造一个已按波次缩放的敌人实体（内部复用入口，不直推 world.enemies）。
+// opts：hpMul / spMul（分裂子代血量/速度折扣）；splitChild（标记子代不再分裂）；x/y 覆盖出生点。
+function makeEnemyEntity(world, typeKey, x, y, opts = {}) {
+  const t = ENEMY_TYPES[typeKey];
+  const { hpScale, spdScale, atkScale } = waveScales(world);
+  const hpMul = opts.hpMul || 1, spMul = opts.spMul || 1;
+  const e = {
     id: _idSeq++,
     type: typeKey,
     ...t,
-    x: lane,
-    y: -30,
-    hp: Math.round(t.hp * hpScale),
-    maxHp: Math.round(t.hp * hpScale),
-    speed: t.speed * spdScale,
-    atkDmg: Math.round(t.atkDmg * atkScale),
+    x, y,
+    hp: Math.round(t.hp * hpScale * hpMul),
+    maxHp: Math.round(t.hp * hpScale * hpMul),
+    speed: t.speed * spdScale * spMul,
+    atkDmg: Math.round(t.atkDmg * atkScale * hpMul),
     st: makeEnemy(t.targetType),
     alive: true,
     hitFlash: 0,
-    attacking: false,     // 是否已抵达防线转为攻击姿态
+    attacking: false,     // 是否已抵达防线 / standoff 线转为攻击姿态
     attackTimer: 0,
     attackFlash: 0,
-  });
+    splitChild: !!opts.splitChild,
+    standoffY: t.standoff ? Math.round(WORLD.H * t.standoffFrac) : 0,
+  };
+  if (t.bomber) e.boomDmgScaled = Math.round(t.boomDmg * atkScale); // 自爆兵抵线爆炸伤害随波次成长
+  return e;
+}
+
+function spawnEnemy(world, typeKey) {
+  const lane = 40 + Math.random() * (WORLD.W - 80);
+  world.enemies.push(makeEnemyEntity(world, typeKey, lane, -30));
+}
+
+// 蜂群：05 册约束——极小成片、横向铺开、间距明显、不聚堆；单次 8-12 只；死亡不产尸爆。
+// 横向均匀铺满屏幕宽度，加少量随机抖动，避免叠在一起被一发穿透秒光（那会废掉"数量即血条"）。
+function spawnSwarm(world, count) {
+  const margin = 28, span = WORLD.W - margin * 2;
+  for (let i = 0; i < count; i++) {
+    const x = margin + (count <= 1 ? span / 2 : (span * i) / (count - 1)) + (Math.random() * 14 - 7);
+    const y = -20 - Math.random() * 46;
+    world.enemies.push(makeEnemyEntity(world, 'swarm', x, y));
+  }
+}
+
+// 分裂兵死亡：裂成 2 只小兵（子代不再分裂，防递归雪球）。
+function spawnSplitChildren(world, parent) {
+  for (let s = -1; s <= 1; s += 2) {
+    world.pendingEnemies.push(
+      makeEnemyEntity(world, 'splitter', parent.x + s * 14, parent.y - 4, { splitChild: true, hpMul: 0.4, spMul: 1.15 })
+    );
+  }
 }
 
 // 加权随机出怪：读当前波的 composition（WAVE_SCRIPT），轮盘赌自动归一化。
-// 前 3 波的 composition 里 armored=0，自然实现"第 4 波才引入装甲"的节奏（04 册 §三「引入」波）。
+// composition 只含常规出怪类型；蜂群由 swarmQueued 单独投放（见 update 出怪块），不进此池。
+const ENEMY_POOL = ['zombie', 'runner', 'armored', 'ranged', 'bomber', 'flyer', 'splitter'];
 function pickEnemyType(world) {
   const comp = (WAVE_SCRIPT[world.wave - 1] || WAVE_SCRIPT[WAVE_SCRIPT.length - 1]).composition;
-  const z = comp.zombie || 0, r = comp.runner || 0, a = comp.armored || 0;
-  const total = z + r + a;
+  const entries = ENEMY_POOL.map((k) => [k, comp[k] || 0]).filter(([, w]) => w > 0);
+  const total = entries.reduce((s, [, w]) => s + w, 0);
   if (total <= 0) return 'zombie';
   let x = Math.random() * total;
-  if ((x -= a) < 0) return 'armored';   // 先判稀有（装甲）
-  if ((x -= r) < 0) return 'runner';
+  for (const [k, w] of entries) { if ((x -= w) < 0) return k; }
   return 'zombie';
 }
 
@@ -420,6 +475,9 @@ function killEnemy(world, enemy, scored = true) {
     world.killCount += 1;
     gainXp(world, enemy.xp);
   }
+  // 分裂兵：死亡裂成 2 只小兵（子代不再分裂，防递归）。推迟到 pendingEnemies，
+  // 避免在敌人循环遍历中增长数组；在 update 末尾并入。
+  if (enemy.splitter && !enemy.splitChild) spawnSplitChildren(world, enemy);
   // 死亡爆裂粒子
   const n = 10;
   for (let i = 0; i < n; i++) {
@@ -427,6 +485,30 @@ function killEnemy(world, enemy, scored = true) {
     const sp = 60 + Math.random() * 120;
     addParticle(world, enemy.x, enemy.y, Math.cos(a) * sp, Math.sin(a) * sp, 420, enemy.color, 3);
   }
+}
+
+// 自爆兵抵线爆炸：对要塞造成大额伤害后消失（自身也计分，视为被消灭）。
+// 爆炸光环 + 碎片纯表现；核心是把"漏掉自爆兵"的代价做成"要塞掉一大块血"，而非瞬间团灭。
+function bomberExplode(world, e) {
+  addRing(world, e.x, e.y, 42, e.color);
+  for (let i = 0; i < 16; i++) {
+    const a = Math.random() * Math.PI * 2, sp = 60 + Math.random() * 150;
+    addParticle(world, e.x, e.y, Math.cos(a) * sp, Math.sin(a) * sp, 380, e.color, 3);
+  }
+  damageFortress(world, e.boomDmgScaled || e.boomDmg, e);
+  killEnemy(world, e);
+}
+
+// 远程兵喷吐：从自身朝要塞发射一枚弹丸，弹丸越线即命中要塞（见 update 的 enemyShots 推进）。
+function spawnEnemyShot(world, e) {
+  const p = world.player;
+  const ang = Math.atan2(p.y - e.y, p.x - e.x);
+  const sp = 260;
+  world.enemyShots.push({
+    x: e.x, y: e.y,
+    vx: Math.cos(ang) * sp, vy: Math.sin(ang) * sp,
+    dmg: e.atkDmg, life: 4500, radius: 5, color: '#c8a8ff',
+  });
 }
 
 // ── 经验 / 升级（03 册一节：经验来自击杀，每波保证至少升一级）──
@@ -916,6 +998,8 @@ export function update(world, dtMs) {
     let batch = script.batch;
     if (Math.random() < script.extraChance) batch += 1;
     for (let i = 0; i < batch; i++) spawnEnemy(world, pickEnemyType(world));
+    // 蜂群检查点波：一次性投放一整片蜂群（05 册约束：只波 7/13/17，单次 8-12 只），随后归零
+    if (world.swarmQueued > 0) { spawnSwarm(world, world.swarmQueued); world.swarmQueued = 0; }
     world.spawnTimer = script.interval * SPAWN_INTERVAL_TUNE;
   }
   // 波次推进：按时间（04 册"波间无停顿"，上一波超时即接下一波），封顶 20 波
@@ -924,6 +1008,7 @@ export function update(world, dtMs) {
     const next = WAVE_SCRIPT[world.wave - 1] || WAVE_SCRIPT[WAVE_SCRIPT.length - 1];
     world.waveName = next.name;
     world.waveBreath = !!next.breath;
+    world.swarmQueued = next.swarm || 0; // 进入检查点波即写入待投放蜂群数
   }
   if (timeUp && world.enemies.length === 0 && !world.gameOver) {
     world.won = true; world.gameOver = true; world.running = false;
@@ -964,7 +1049,7 @@ export function update(world, dtMs) {
     if (e.hitFlash > 0) e.hitFlash -= dtMs;
     if (e.attackFlash > 0) e.attackFlash -= dtMs;
 
-    // 抵达防线：停住并转为持续攻击姿态（不会一次性消失）
+    // 攻击姿态（已抵达防线 or 远程兵已到 standoff 线）：停住并持续输出
     if (e.attacking) {
       const frozen = has(e.st, 'freeze') || has(e.st, 'stun');
       if (!frozen) {
@@ -972,10 +1057,17 @@ export function update(world, dtMs) {
         if (e.attackTimer <= 0) {
           e.attackTimer = e.atkIntervalMs;
           e.attackFlash = 220;
-          damageFortress(world, e.atkDmg, e);
+          if (e.standoff) spawnEnemyShot(world, e); // 远程兵：向要塞喷吐弹丸（不直接啃防线）
+          else damageFortress(world, e.atkDmg, e);  // 地面兵：持续啃要塞
         }
       }
       continue; // 攻击姿态下不再推进
+    }
+
+    // 自爆兵：触及防线即引爆（不走持续攻击，见 bomberExplode）
+    if (e.bomber && e.y >= FORTRESS.attackLine) {
+      bomberExplode(world, e);
+      continue;
     }
 
     const mult = movementMultiplier(e);
@@ -983,8 +1075,10 @@ export function update(world, dtMs) {
     // 击退（一次性，结算即清）
     const kd = getKnockDistance(e.st);
     if (kd > 0) { e.y = applyKnockToPosition(e.y, kd, -9999).y; clear(e.st, 'knock'); if (e.y < FORTRESS.attackLine) e.attacking = false; }
-    if (e.y >= FORTRESS.attackLine) {
-      e.y = FORTRESS.attackLine;
+    // 抵达线：地面兵到防线、远程兵到 standoff 线即转入攻击姿态
+    const reached = e.standoff ? e.standoffY : FORTRESS.attackLine;
+    if (e.y >= reached) {
+      e.y = reached;
       e.attacking = true;
       e.attackTimer = e.atkIntervalMs * 0.5; // 抵达后半拍就出手
     }
@@ -1067,6 +1161,19 @@ export function update(world, dtMs) {
     }
   }
 
+  // ── 远程兵弹丸推进 + 命中要塞 ──
+  for (const s of world.enemyShots) {
+    s.x += s.vx * (dtMs / 1000);
+    s.y += s.vy * (dtMs / 1000);
+    s.life -= dtMs;
+    if (s.life <= 0 || s.x < -20 || s.x > WORLD.W + 20 || s.y > WORLD.H + 20) { s.dead = true; continue; }
+    // 弹丸越过防线即命中要塞（远程兵的"攻击"结算点在墙，而非贴脸）
+    if (s.y >= FORTRESS.attackLine) {
+      damageFortress(world, s.dmg, { type: 'ranged' });
+      s.dead = true;
+    }
+  }
+
   // ── 粒子 / 浮字 / 光环寿命 ──
   for (const pt of world.particles) { pt.x += pt.vx * (dtMs / 1000); pt.y += pt.vy * (dtMs / 1000); pt.life -= dtMs; }
   for (const f of world.floaters) { f.y -= 22 * (dtMs / 1000); f.life -= dtMs; }
@@ -1102,9 +1209,16 @@ export function update(world, dtMs) {
   if (world.petFlash > 0) world.petFlash -= dtMs;
 
   // ── 清理死亡实体 ──
+  // 先并入本帧生成的敌人（分裂子代/蜂群），再统一过滤——分裂在 killEnemy 里推到 pendingEnemies，
+  // 若直接 push 到 world.enemies 会在上面的敌人循环遍历中增长数组。
+  if (world.pendingEnemies.length > 0) {
+    world.enemies.push(...world.pendingEnemies);
+    world.pendingEnemies.length = 0;
+  }
   world.enemies = world.enemies.filter((e) => e.alive);
   world.bullets = world.bullets.filter((b) => !b.dead);
   world.skillShots = world.skillShots.filter((s) => !s.dead);
+  world.enemyShots = world.enemyShots.filter((s) => !s.dead);
   world.strikes = world.strikes.filter((s) => s.life > 0);
   world.arcs = world.arcs.filter((a) => a.life > 0);
   world.storms = world.storms.filter((s) => s.life > 0);
