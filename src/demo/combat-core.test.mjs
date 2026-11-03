@@ -1082,6 +1082,7 @@ console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃
   const keys = ['ray', 'laser', 'turret', 'flame', 'saw'];
   ok('SKILLS 共 9 技能', Object.keys(SKILLS).length === 9);
   ok('五技能均有 name/color/cooldownMs', keys.every((k) => SKILLS[k] && SKILLS[k].name && SKILLS[k].color && SKILLS[k].cooldownMs > 0));
+  ok('高能射线：持续 2s / 共 6 段 / 长度覆盖全屏（用户 2026-11-03 反馈）', SKILLS.ray.durMs === 2000 && Math.abs(SKILLS.ray.tickMs - 2000 / 6) < 1 && SKILLS.ray.len >= WORLD.H);
   ok('mods.skillCdMul 覆盖 9 技能', keys.every((k) => typeof createWorld().mods.skillCdMul[k] === 'number'));
   ok('五技能 count 修正字段均为数值（防 NaN 施放静默空转）', keys.every((k) => typeof createWorld().mods[`${k}Count`] === 'number'));
   ok('LEARN_CARDS 共 9 张（含五技能）', LEARN_CARDS.length === 9 && keys.every((k) => LEARN_CARDS.some((c) => c.target === k)));
@@ -1105,7 +1106,7 @@ console.log('— 五技能补齐：高能射线 / 制导激光 / 哨戒机 / 燃
     const e = makeEnemyEntity('zombie', PLAYER.x, 300); e.hp = 999999; e.maxHp = 999999; e.speed = 0;
     w.enemies.push(e); learnSkill(w, 'ray'); w.mods.rayEcho = 1;
     castSkill(w, 'ray');
-    for (let i = 0; i < 110; i++) update(w, 16); // ≈1.76s：第一道光束到期 → 续射一道
+    for (let i = 0; i < 150; i++) update(w, 16); // ≈2.4s：第一道光束（2s）到期 → 续射一道
     ok('高能射线「二次射线」：光束到期后续射一道（续射不链式）', w.beams.length === 1 && w.beams[0].echo === false);
   }
   // 制导激光：窄扇面扫到敌人伤害
