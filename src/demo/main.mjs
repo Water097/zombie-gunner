@@ -161,6 +161,7 @@ function frame(now) {
 // ── 渲染 ──
 function render() {
   ctx.clearRect(0, 0, WORLD.W, WORLD.H);
+  ctx.lineJoin = 'round'; ctx.lineCap = 'round'; // 全局柔边笔触（2026-11-04 画风落地）
   drawBackground();
   drawStorms();
   drawFlames();     // 地面火区（在敌人之下）
@@ -197,15 +198,68 @@ function roundRect(x, y, w, h, r) {
   ctx.closePath();
 }
 
+// ── 柔和霓虹画笔（2026-11-04 画风落地：Q版 / 软描边 / 平滑渐变 / 温和辉光）──
+// 依据《向僵尸开炮》参考：不要多色硬勾边、不要碎线；描边改为深青柔边，体块用径向渐变，
+// 眼睛/武器/能量做柔和辉光。只影响渲染，不动任何游戏逻辑。
+const OUTLINE = 'rgba(10,20,24,0.9)'; // 深青柔边（非纯黑，避免发凶）
+function hexToRgb(h) {
+  h = h.replace('#', '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  const n = parseInt(h, 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+// amt>0 向白提亮，amt<0 压暗
+function shade(hex, amt) {
+  const { r, g, b } = hexToRgb(hex);
+  const cl = (v) => Math.max(0, Math.min(255, Math.round(v)));
+  if (amt >= 0) return `rgb(${cl(r + (255 - r) * amt)},${cl(g + (255 - g) * amt)},${cl(b + (255 - b) * amt)})`;
+  const f = 1 + amt;
+  return `rgb(${cl(r * f)},${cl(g * f)},${cl(b * f)})`;
+}
+// 柔和果冻体：深青柔边 + 径向渐变 + 顶部高光（squash 纵向压扁比例）
+function softBlob(x, y, r, color, squash = 1) {
+  ctx.fillStyle = OUTLINE;
+  ctx.beginPath(); ctx.ellipse(x, y, r + 1.6, r * squash + 1.6, 0, 0, Math.PI * 2); ctx.fill();
+  const g = ctx.createRadialGradient(x - r * 0.32, y - r * 0.4 * squash, Math.max(1, r * 0.15), x, y, r * 1.08);
+  g.addColorStop(0, shade(color, 0.32));
+  g.addColorStop(0.62, color);
+  g.addColorStop(1, shade(color, -0.32));
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.ellipse(x, y, r, r * squash, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.14)';
+  ctx.beginPath(); ctx.ellipse(x - r * 0.28, y - r * 0.42 * squash, r * 0.44, r * 0.26, -0.5, 0, Math.PI * 2); ctx.fill();
+}
+// 柔和发光眼：外圈低透明辉光 + 亮芯 + 高光点
+function glowEyes(x, y, dx, r, color) {
+  for (const sx of [-1, 1]) {
+    const ex = x + sx * dx, ey = y;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(ex, ey, r * 1.9, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.beginPath(); ctx.arc(ex, ey, r, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath(); ctx.arc(ex - r * 0.28, ey - r * 0.28, r * 0.42, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
 function drawBackground() {
   const g = ctx.createLinearGradient(0, 0, 0, WORLD.H);
-  g.addColorStop(0, '#0b1020');
-  g.addColorStop(1, '#16203a');
+  g.addColorStop(0, '#17262b');
+  g.addColorStop(0.55, '#121f24');
+  g.addColorStop(1, '#0d171b');
   ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
-  ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1;
-  for (let x = 60; x < WORLD.W; x += 60) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD.H); ctx.stroke(); }
-  // 防线：敌人推进到此线即停住并持续攻击要塞
-  ctx.strokeStyle = 'rgba(255,120,120,0.35)'; ctx.setLineDash([6, 6]);
+  // 暖棕砖格（工业地面氛围，低对比）
+  ctx.strokeStyle = 'rgba(122,86,56,0.10)'; ctx.lineWidth = 1;
+  for (let x = 45; x < WORLD.W; x += 45) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD.H); ctx.stroke(); }
+  for (let y = 0; y < WORLD.H; y += 45) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD.W, y); ctx.stroke(); }
+  // 中线柔光晕，制造纵深
+  const vg = ctx.createRadialGradient(WORLD.W / 2, WORLD.H * 0.34, 60, WORLD.W / 2, WORLD.H * 0.34, WORLD.H * 0.82);
+  vg.addColorStop(0, 'rgba(90,150,150,0.07)');
+  vg.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
+  // 防线：柔和红色虚线（敌人推进到此线停住）
+  ctx.strokeStyle = 'rgba(255,120,120,0.22)'; ctx.setLineDash([7, 9]); ctx.lineWidth = 1.5;
   ctx.beginPath(); ctx.moveTo(0, FORTRESS.attackLine); ctx.lineTo(WORLD.W, FORTRESS.attackLine); ctx.stroke();
   ctx.setLineDash([]);
 }
@@ -213,27 +267,69 @@ function drawBackground() {
 function drawFortress() {
   const p = world.player;
   const hurt = world.fortressFlash > 0;
-  // 要塞墙体（位于玩家前方）
-  ctx.fillStyle = hurt ? '#6b2b34' : '#2a3a5c';
-  ctx.fillRect(0, p.y + 16, WORLD.W, WORLD.H - p.y - 16);
-  // 基座
-  ctx.fillStyle = hurt ? '#ff8a8a' : '#3a4f7a';
-  ctx.beginPath(); ctx.arc(p.x, p.y, 30, 0, Math.PI * 2); ctx.fill();
-  // 炮管（指向目标）
+  const wallTop = p.y + 16;
+  // 要塞墙体（工业暖橙调，纵向渐变，软边）
+  const wg = ctx.createLinearGradient(0, wallTop, 0, WORLD.H);
+  wg.addColorStop(0, hurt ? '#7a3a3a' : '#37474f');
+  wg.addColorStop(1, hurt ? '#482226' : '#1e2a30');
+  ctx.fillStyle = wg; ctx.fillRect(0, wallTop, WORLD.W, WORLD.H - wallTop);
+  // 顶部金属条（暖橙高光）
+  ctx.fillStyle = hurt ? '#ff9a9a' : '#c8792f';
+  ctx.fillRect(0, wallTop, WORLD.W, 4);
+  ctx.fillStyle = 'rgba(255,255,255,0.10)';
+  ctx.fillRect(0, wallTop + 4, WORLD.W, 3);
+  // 墙面板缝
+  ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1;
+  for (let x = 40; x < WORLD.W; x += 60) { ctx.beginPath(); ctx.moveTo(x, wallTop + 6); ctx.lineTo(x, WORLD.H); ctx.stroke(); }
+
+  // 青色能量护罩（半圆罩在炮手后方，半透明）
+  const sg = ctx.createRadialGradient(p.x, p.y, 10, p.x, p.y, 68);
+  sg.addColorStop(0, 'rgba(90,230,220,0.00)');
+  sg.addColorStop(0.72, 'rgba(90,230,220,0.10)');
+  sg.addColorStop(1, 'rgba(90,230,220,0.00)');
+  ctx.fillStyle = sg;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 68, Math.PI, Math.PI * 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(120,240,230,0.32)'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(p.x, p.y, 68, Math.PI * 1.06, Math.PI * 1.94); ctx.stroke();
+
+  // 炮手底座（圆润机械台）
+  ctx.fillStyle = '#26343c';
+  ctx.beginPath(); ctx.ellipse(p.x, p.y + 10, 34, 16, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#37505c';
+  ctx.beginPath(); ctx.ellipse(p.x, p.y + 6, 28, 12, 0, 0, Math.PI * 2); ctx.fill();
+
+  // 炮手：果冻体 + 头盔 + 发光面罩
+  softBlob(p.x, p.y - 2, 15, '#5b7486', 1.05);
+  ctx.fillStyle = '#6f8a9c';
+  ctx.beginPath(); ctx.arc(p.x, p.y - 12, 11, Math.PI, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = hurt ? '#ffb3b3' : '#8ff0ff';
+  ctx.globalAlpha = 0.9;
+  roundRect(p.x - 7, p.y - 14, 14, 5, 2.5); ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // 主武器炮管（朝目标角度，软边）
   ctx.save();
-  ctx.translate(p.x, p.y); ctx.rotate(p.angle);
-  ctx.fillStyle = '#9fc0ff';
-  ctx.fillRect(0, -6, 34, 12);
+  ctx.translate(p.x, p.y - 4); ctx.rotate(p.angle);
+  ctx.fillStyle = OUTLINE;
+  roundRect(-2, -6, 36, 12, 4); ctx.fill();
+  ctx.fillStyle = '#8fa6b6';
+  roundRect(0, -5, 32, 10, 3); ctx.fill();
+  ctx.fillStyle = '#cfe3ff';
+  roundRect(24, -2, 8, 4, 2); ctx.fill();
   ctx.restore();
-  // 核心
-  ctx.fillStyle = hurt ? '#ffd6d6' : '#cfe3ff';
-  ctx.beginPath(); ctx.arc(p.x, p.y, 12, 0, Math.PI * 2); ctx.fill();
+
+  // 胸口能量核心
+  ctx.fillStyle = 'rgba(120,240,230,0.25)';
+  ctx.beginPath(); ctx.arc(p.x, p.y + 2, 9, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#aef6ef';
+  ctx.beginPath(); ctx.arc(p.x, p.y + 2, 4, 0, Math.PI * 2); ctx.fill();
+
   // 自动瞄准连线（主武器由要塞自己打）
   const tgt = world.enemies.find((e) => e.id === p.targetId);
   if (tgt) {
-    ctx.strokeStyle = 'rgba(255,220,120,0.35)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(tgt.x, tgt.y); ctx.stroke();
-    ctx.strokeStyle = 'rgba(255,220,120,0.9)';
+    ctx.strokeStyle = 'rgba(255,220,120,0.20)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(p.x, p.y - 4); ctx.lineTo(tgt.x, tgt.y); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,220,120,0.75)';
     ctx.beginPath(); ctx.arc(tgt.x, tgt.y, tgt.radius + 6, 0, Math.PI * 2); ctx.stroke();
   }
   drawFortressHpBar();
@@ -255,94 +351,126 @@ function drawFortressHpBar() {
 }
 
 // 宠物机器人：所有技能都由它释放（玩家对象只管主武器射击与换弹）
+// 2026-11-04 画风落地：蓝灰机械猫（猫耳 + 青色面罩 + 小爪 + 尾巴光点），对齐参考图
 function drawPet() {
   const pet = petPos(world);
   const bob = Math.sin(world.time / 260) * 3;
   const x = pet.x, y = pet.y + bob;
   const flash = world.petFlash > 0;
   // 悬浮阴影
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.beginPath(); ctx.ellipse(pet.x, pet.y + 14, 12, 4, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.30)';
+  ctx.beginPath(); ctx.ellipse(pet.x, pet.y + 15, 13, 4, 0, 0, Math.PI * 2); ctx.fill();
   if (flash) {
-    ctx.globalAlpha = Math.max(0, world.petFlash / 320) * 0.8;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath(); ctx.arc(x, y, 20, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = Math.max(0, world.petFlash / 320) * 0.7;
+    ctx.fillStyle = '#bffcff';
+    ctx.beginPath(); ctx.arc(x, y, 22, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 1;
   }
-  // 机翼/螺旋桨
-  ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 2;
-  ctx.beginPath(); ctx.moveTo(x - 16, y - 6); ctx.lineTo(x - 9, y - 6); ctx.stroke();
-  ctx.beginPath(); ctx.moveTo(x + 9, y - 6); ctx.lineTo(x + 16, y - 6); ctx.stroke();
-  // 机身（浅蓝青色圆润机体，对齐参考原图的无人机）
-  ctx.fillStyle = flash ? '#eaf6ff' : '#7fd8e8';
-  roundRect(x - PET.w / 2, y - PET.h / 2, PET.w, PET.h, 8); ctx.fill();
-  ctx.strokeStyle = '#eaf6ff'; ctx.lineWidth = 1.5;
-  roundRect(x - PET.w / 2, y - PET.h / 2, PET.w, PET.h, 8); ctx.stroke();
+  // 猫耳
+  ctx.fillStyle = '#5f7488';
+  for (const sx of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(x + sx * 7, y - 8);
+    ctx.lineTo(x + sx * 3, y - 16);
+    ctx.lineTo(x + sx * 11, y - 13);
+    ctx.closePath(); ctx.fill();
+  }
+  // 机身（蓝灰圆润果冻体）
+  softBlob(x, y, 11, flash ? '#cfeaff' : '#7f97a8', 0.95);
+  // 面罩（青色发光底盘）
+  ctx.fillStyle = 'rgba(120,240,230,0.22)';
+  ctx.beginPath(); ctx.arc(x, y - 1, 9, 0, Math.PI * 2); ctx.fill();
   // 眼睛（朝向当前目标）
   const tgt = world.enemies.find((e) => e.id === world.player.targetId);
   let ex = 0, ey = 0;
-  if (tgt) { const a = Math.atan2(tgt.y - y, tgt.x - x); ex = Math.cos(a) * 3; ey = Math.sin(a) * 3; }
-  ctx.fillStyle = '#0b1020';
-  ctx.beginPath(); ctx.arc(x - 5 + ex, y + ey, 2.6, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.arc(x + 5 + ex, y + ey, 2.6, 0, Math.PI * 2); ctx.fill();
+  if (tgt) { const a = Math.atan2(tgt.y - y, tgt.x - x); ex = Math.cos(a) * 2.2; ey = Math.sin(a) * 2.2; }
+  ctx.fillStyle = '#7ff0e6';
+  ctx.beginPath(); ctx.arc(x - 4 + ex, y - 2 + ey, 2.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + 4 + ex, y - 2 + ey, 2.2, 0, Math.PI * 2); ctx.fill();
+  // 小爪
+  ctx.strokeStyle = '#5f7488'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(x - 9, y + 6); ctx.lineTo(x - 12, y + 10); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x + 9, y + 6); ctx.lineTo(x + 12, y + 10); ctx.stroke();
+  // 尾巴光点
+  ctx.fillStyle = 'rgba(127,240,230,0.7)';
+  ctx.beginPath(); ctx.arc(x + 13, y + 4, 2.2, 0, Math.PI * 2); ctx.fill();
 }
 
-// 敌人专属外形（2026-11-03 补齐 5 种新敌；原 3 种保留辨识度）。
+// 敌人专属外形（2026-11-04 画风落地：Q 版柔和僵尸，果冻体 + 发光眼 + 各型专属特征）。
 // 只画"身体"，状态环/血条/状态图标仍由 drawEnemies 在身体之上叠加。
 function drawEnemyBody(e, x, y, r) {
   switch (e.type) {
-    case 'armored': { // 装甲尸车：方盒车体 + 高光（硬门禁对象，辨识度优先）
-      ctx.fillStyle = e.color;
-      ctx.fillRect(x - r, y - r * 0.82, r * 2, r * 1.64);
-      ctx.fillStyle = 'rgba(255,255,255,0.18)';
-      ctx.fillRect(x - r * 0.62, y - r * 0.55, r * 1.24, r * 0.5);
+    case 'armored': { // 装甲尸车：厚实圆角车体 + 装甲横带 + 双头
+      softBlob(x, y, r, e.color, 0.92);
+      ctx.fillStyle = shade(e.color, 0.35);
+      roundRect(x - r * 0.82, y - r * 0.18, r * 1.64, r * 0.34, 4); ctx.fill();
+      ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.2;
+      roundRect(x - r * 0.82, y - r * 0.18, r * 1.64, r * 0.34, 4); ctx.stroke();
+      glowEyes(x - r * 0.34, y - r * 0.48, r * 0.14, r * 0.14, '#8ff0ff');
+      glowEyes(x + r * 0.34, y - r * 0.48, r * 0.14, r * 0.14, '#8ff0ff');
       return;
     }
-    case 'ranged': { // 远程尸：高瘦椭圆（站着喷吐，与近战区分）
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.ellipse(x, y, r * 0.72, r * 1.15, 0, 0, Math.PI * 2); ctx.fill();
+    case 'ranged': { // 远程尸：瘦高果冻体 + 手持发光球
+      softBlob(x, y, r * 0.86, e.color, 1.05);
+      ctx.fillStyle = 'rgba(90,209,255,0.28)';
+      ctx.beginPath(); ctx.arc(x + r * 0.7, y + r * 0.5, r * 0.55, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#7fe6ff';
+      ctx.beginPath(); ctx.arc(x + r * 0.7, y + r * 0.5, r * 0.3, 0, Math.PI * 2); ctx.fill();
+      glowEyes(x, y - r * 0.35, r * 0.3, r * 0.15, '#e8ddff');
       return;
     }
-    case 'bomber': { // 自爆尸：圆肚 + 临线脉动内核心（危险信号）
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    case 'bomber': { // 自爆尸：圆肚 + 胸前炸弹桶（临线脉动核心 = 危险信号）
+      softBlob(x, y, r, e.color, 0.98);
       const prox = Math.max(0, Math.min(1, (y - 360) / (FORTRESS.attackLine - 360)));
-      ctx.fillStyle = `rgba(255,232,120,${0.3 + prox * 0.55})`;
-      ctx.beginPath(); ctx.arc(x, y, r * 0.45, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3a2b28';
+      roundRect(x - r * 0.34, y + r * 0.02, r * 0.68, r * 0.5, r * 0.18); ctx.fill();
+      ctx.fillStyle = `rgba(255,232,120,${0.45 + prox * 0.5})`;
+      ctx.beginPath(); ctx.arc(x, y + r * 0.27, r * 0.2, 0, Math.PI * 2); ctx.fill();
+      glowEyes(x, y - r * 0.42, r * 0.28, r * 0.14, '#ffe8a0');
       return;
     }
-    case 'flyer': { // 飞行尸：圆身 + 两侧翼三角（空中单位）
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = 'rgba(143,208,232,0.75)';
-      ctx.beginPath(); ctx.moveTo(x - r, y); ctx.lineTo(x - r - 11, y - 6); ctx.lineTo(x - r - 4, y + 6); ctx.closePath(); ctx.fill();
-      ctx.beginPath(); ctx.moveTo(x + r, y); ctx.lineTo(x + r + 11, y - 6); ctx.lineTo(x + r + 4, y + 6); ctx.closePath(); ctx.fill();
+    case 'flyer': { // 飞行尸：柔和半透明翼 + 悬浮身体
+      ctx.fillStyle = 'rgba(143,208,232,0.5)';
+      ctx.beginPath(); ctx.ellipse(x - r * 1.05, y - r * 0.1, r * 0.62, r * 0.34, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x + r * 1.05, y - r * 0.1, r * 0.62, r * 0.34, -0.5, 0, Math.PI * 2); ctx.fill();
+      softBlob(x, y, r * 0.8, e.color, 1);
+      glowEyes(x, y - r * 0.2, r * 0.28, r * 0.14, '#eaffff');
       return;
     }
     case 'splitter': { // 分裂尸：半透明 + 中缝（提示会裂）
-      ctx.globalAlpha = 0.8;
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.85;
+      softBlob(x, y, r, e.color, 1);
       ctx.globalAlpha = 1;
-      ctx.strokeStyle = 'rgba(50,80,25,0.85)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x - r * 0.7, y); ctx.lineTo(x + r * 0.7, y); ctx.stroke();
+      ctx.strokeStyle = 'rgba(40,60,20,0.7)'; ctx.lineWidth = r * 0.16; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, y - r * 0.85); ctx.lineTo(x, y + r * 0.85); ctx.stroke();
+      glowEyes(x - r * 0.34, y - r * 0.35, r * 0.12, r * 0.13, '#d7ff8a');
+      glowEyes(x + r * 0.34, y - r * 0.35, r * 0.12, r * 0.13, '#d7ff8a');
       return;
     }
-    case 'swarm': { // 蜂群：极小的暗黄点（数量即血条）
+    case 'swarm': { // 蜂群：极小暗黄团（数量即血条）
+      ctx.fillStyle = 'rgba(201,168,58,0.3)';
+      ctx.beginPath(); ctx.arc(x, y, r * 2, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = e.color;
       ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = 'rgba(255,255,255,0.85)';
+      ctx.beginPath(); ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.4, 0, Math.PI * 2); ctx.fill();
       return;
     }
-    case 'runner': { // 疾行尸：圆身 + 速度 chevron（快）
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
-      ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2;
-      ctx.beginPath(); ctx.moveTo(x - r * 0.6, y - 4); ctx.lineTo(x - r - 5, y); ctx.lineTo(x - r * 0.6, y + 4); ctx.stroke();
+    case 'runner': { // 疾行尸：瘦削果冻体 + 速度 chevron
+      softBlob(x, y, r * 0.92, e.color, 0.9);
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x - r * 0.7, y - 4); ctx.lineTo(x - r - 6, y); ctx.lineTo(x - r * 0.7, y + 4); ctx.stroke();
+      glowEyes(x, y - r * 0.28, r * 0.3, r * 0.14, '#fff2b0');
       return;
     }
-    default: { // 普通僵尸：圆身
-      ctx.fillStyle = e.color;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+    default: { // 普通僵尸：青绿果冻体 + 发光眼 + 破衣下摆
+      softBlob(x, y, r, e.color, 0.96);
+      ctx.fillStyle = shade(e.color, -0.35);
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.7, y + r * 0.6); ctx.lineTo(x + r * 0.7, y + r * 0.6);
+      ctx.lineTo(x + r * 0.5, y + r * 0.96); ctx.lineTo(x - r * 0.5, y + r * 0.96);
+      ctx.closePath(); ctx.fill();
+      glowEyes(x, y - r * 0.28, r * 0.32, r * 0.15, '#97f7e6');
       return;
     }
   }
@@ -363,14 +491,21 @@ function drawEnemies() {
       ctx.beginPath(); ctx.arc(x, y, r + 5, 0, Math.PI * 2); ctx.stroke();
     }
     drawEnemyBody(e, x, y, r);
-    if (e.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
-    if (has(e.st, 'freeze')) { ctx.strokeStyle = '#5ad1ff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
-    else if (has(e.st, 'stun')) { ctx.strokeStyle = '#c77dff'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
-    else if (has(e.st, 'burn')) { ctx.strokeStyle = '#ff7a3c'; ctx.lineWidth = 2; ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke(); }
-    const bw = r * 2;
-    ctx.fillStyle = 'rgba(0,0,0,0.5)'; ctx.fillRect(x - r, y - r - 9, bw, 4);
-    ctx.fillStyle = e.hp / e.maxHp > 0.35 ? '#7fe07f' : '#ff6b6b';
-    ctx.fillRect(x - r, y - r - 9, bw * Math.max(0, e.hp / e.maxHp), 4);
+    if (e.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,0.42)'; ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
+    const stCol = has(e.st, 'freeze') ? '#5ad1ff' : has(e.st, 'stun') ? '#c77dff' : has(e.st, 'burn') ? '#ff7a3c' : null;
+    if (stCol) {
+      ctx.globalAlpha = 0.22; ctx.fillStyle = stCol;
+      ctx.beginPath(); ctx.arc(x, y, r + 4, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = stCol; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(x, y, r + 2, 0, Math.PI * 2); ctx.stroke();
+    }
+    // 血条（圆角柔边）
+    const bw = Math.max(10, r * 2), by = y - r - 10;
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    roundRect(x - bw / 2, by, bw, 4, 2); ctx.fill();
+    ctx.fillStyle = e.hp / e.maxHp > 0.35 ? '#8fe08f' : '#ff7a7a';
+    roundRect(x - bw / 2, by, Math.max(0, bw * (e.hp / e.maxHp)), 4, 2); ctx.fill();
     drawStatusIcons(e, x - r, y - r - 22);
   }
 }
@@ -390,10 +525,12 @@ function drawEnemyShots() {
   // 远程尸喷吐的弹丸（打要塞）：暗紫发光小球，与玩家子弹橙黄区分
   for (const s of world.enemyShots) {
     if (s.dead) continue;
-    ctx.fillStyle = 'rgba(157,142,196,0.35)';
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.radius + 2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(157,142,196,0.28)';
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.radius + 4, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = '#b9a8e0';
     ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.arc(s.x - s.radius * 0.3, s.y - s.radius * 0.3, s.radius * 0.4, 0, Math.PI * 2); ctx.fill();
   }
 }
 

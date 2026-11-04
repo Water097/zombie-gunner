@@ -12,3 +12,6 @@ Thumbs.db
 
 # WorkBuddy 项目记忆（不进公开仓库）
 .workbuddy/
+
+# AI 生成的概念图/参考图（过程产物，不进仓库）
+generated-images/
