@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>特效对照 · pixelfx 内核 → 柔和卡通版</title>
+<style>
+  :root{ --bg:#0d171b; --panel:#142127; --line:#2a3d44; --txt:#e7eefc; --dim:#8fa6b6; --accent:#7fe0ff; }
+  *{box-sizing:border-box}
+  body{margin:0;padding:28px 24px 60px;background:radial-gradient(1200px 600px at 50% -10%,#1b3038,#0d171b 70%);color:var(--txt);font:14px/1.6 "PingFang SC","Microsoft YaHei",sans-serif}
+  h1{font-size:24px;margin:0 0 6px}
+  .lead{color:var(--dim);max-width:1000px;margin:0}
+  .lead b{color:var(--txt)}
+  .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0 22px}
+  .note{color:#ffd98a;background:rgba(255,217,138,.08);border:1px solid rgba(255,217,138,.25);padding:8px 12px;border-radius:8px;font-size:12px}
+  a.btn{display:inline-block;padding:8px 14px;border-radius:8px;background:rgba(127,224,255,.14);border:1px solid rgba(127,224,255,.4);color:#bff0ff;text-decoration:none;font-size:12px}
+  a.btn:hover{background:rgba(127,224,255,.24)}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;max-width:1440px}
+  .case{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;overflow:hidden}
+  .case h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .case h2 span{font-size:11px;color:var(--dim);font-weight:400}
+  .pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
+  .col{min-width:0}
+  .tag{font-size:11px;color:var(--dim);margin:0 0 6px;display:flex;justify-content:space-between;gap:6px}
+  .tag b{color:var(--accent);font-weight:600}
+  .frame{width:100%;aspect-ratio:16/9;background:#0b1116;border:1px solid #22323a;border-radius:10px;overflow:hidden;display:block}
+  img.frame{object-fit:contain;image-rendering:pixelated}
+  canvas.frame{display:block}
+  .desc{font-size:11px;color:var(--dim);margin-top:8px;line-height:1.55}
+  code{color:#bff0ff;font-family:ui-monospace,Consolas,monospace}
+  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>特效对照 · 只借内核与编排，画风换成柔和卡通</h1>
+<p class="lead">左：<b>pixelfx 原库原样</b>（硬像素风：1px 网格、抖动网点、像素字、白热星芒）。右：<b>纯 Canvas2D JS 现写的柔和版</b> —— 零图片素材，加色辉光、深→亮色阶、seeded 随机、相位编排、前后分层全部对齐，只是把像素画刷换成径向渐变与圆头笔触。</p>
+<div class="bar">
+  <div class="note">右侧是<b>实时运行</b>的，不是截图：和 demo 用的是同一份 <code>src/demo/soft-fx.mjs</code>。逻辑层一行未改。</div>
+  <a class="btn" href="index.html">→ 打开 demo 实机</a>
+</div>
+<div class="grid" id="grid"></div>
+
+<script type="module">
+import {
+  SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters,
+  softStar, softGlow, ease, Rng,
+} from './src/demo/soft-fx.mjs';
+
+const W = 320, H = 180, SCALE = 2;
+// 左侧用「6 帧精选」紧凑版（--max 6 --zoom 3），避免 16 帧宽幅在 16:9 框里被压得看不清
+// 对照图已随仓库自带（assets/fx-ref/），不依赖本机未跟踪的第三方库目录
+const REF = (p) => `assets/fx-ref/${p}.png`;
+
+const CASES = [
+  { id:'spark', title:'命中火花', tag:'impacts/hit-spark', period:1100, kind:'particles', src:REF('impacts/hit-spark'),
+    desc:'白热 hero frame → 沿速度方向拉伸的亮尾 → 沿色阶冷却变色 → 余晖消散。' },
+  { id:'ring', title:'冲击环 / 技能落点', tag:'ice/frost-nova', period:900, kind:'rings', src:REF('ice/frost-nova'),
+    desc:'白热起手 + 地面透视环（远半暗 / 近半亮）+ 内亮细环 + 余晖；环内自带纵深分层。' },
+  { id:'number', title:'伤害飘字', tag:'ui/damage-number', period:900, kind:'floaters', src:REF('ui/damage-number'),
+    desc:'白帧 → outBack 弹出放大 → 落地 squash 挤压 → 上浮保持 → 淡出。' },
+  { id:'level', title:'升级 LEVEL UP', tag:'ui/level-up', period:2600, kind:'level', src:REF('ui/level-up'),
+    desc:'蓄力收环 → 白热闪光 → 光柱+三轮上升环 → LEVEL UP! 逐字落下 → 星芒保持 → 消散。' },
+  { id:'coin', title:'金币 / 技能碎片', tag:'pickups/coin-spin', period:1500, kind:'loot-coin', src:REF('pickups/coin-spin'),
+    desc:'闪白出现 → 悬浮旋转（横向缩放模拟绕竖轴）→ 拖尾飞向 HUD 分数 → 收集爆闪。' },
+  { id:'gem', title:'宝石', tag:'pickups/gem-spin', period:1500, kind:'loot-gem', src:REF('pickups/gem-spin'),
+    desc:'同一套编排只换主色即得紫宝石：六边切面 + 高光扫过 + 旋转。' },
+];
+
+const grid = document.getElementById('grid');
+const states = CASES.map((c) => {
+  const el = document.createElement('div');
+  el.className = 'case';
+  el.innerHTML = `
+    <h2>${c.title} <span>${c.tag}</span></h2>
+    <div class="pair">
+      <div class="col"><div class="tag"><span>原库 · 硬像素风</span><b>pixelfx</b></div><img class="frame" src="${c.src}" alt="${c.title} 原版帧图"></div>
+      <div class="col"><div class="tag"><span>柔和卡通版 · 实时</span><b>soft-fx.mjs</b></div><canvas class="frame" width="${W*SCALE}" height="${H*SCALE}"></canvas></div>
+    </div>
+    <div class="desc">${c.desc}</div>`;
+  grid.appendChild(el);
+  const ctx = el.querySelector('canvas').getContext('2d');
+  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
+  return {
+    ...c, ctx,
+    fx: new SoftFx({ seed: 20261104, lootTarget: { x: W * 0.76, y: H * 0.26 } }),
+    last: -1e9,
+  };
+});
+
+let last = performance.now();
+function loop(now) {
+  const dt = Math.min(50, now - last); last = now;
+  for (const s of states) {
+    const ctx = s.ctx;
+    ctx.clearRect(0, 0, W, H);
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#132229'); bg.addColorStop(1, '#0a1216');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+    ctx.strokeStyle = 'rgba(127,224,255,0.10)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, H * 0.78); ctx.lineTo(W, H * 0.78); ctx.stroke();
+    drawCase(s, now, dt);
+  }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function drawCase(s, now, dt) {
+  const ctx = s.ctx, u = (now % s.period) / s.period;
+
+  if (s.kind === 'particles') {
+    const r = new Rng(7), arr = [];
+    for (let i = 0; i < 16; i++) {
+      const a = r.range(0, Math.PI * 2), sp = r.range(70, 200);
+      arr.push({
+        x: W / 2 + Math.cos(a) * sp * u * 0.18, y: H * 0.55 + Math.sin(a) * sp * u * 0.14,
+        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 420 * (1 - u), maxLife: 420,
+        color: i % 3 === 0 ? '#ffe08a' : '#7fe0ff', size: 3,
+      });
+    }
+    drawSoftParticles(ctx, arr);
+    softGlow(ctx, W / 2, H * 0.55, 26, '#ffffff', 0.5 * (1 - u));
+    softStar(ctx, W / 2, H * 0.55, 16 * (1 - u * 0.5), '#ffffff', 0.8 * (1 - u));
+
+  } else if (s.kind === 'rings') {
+    drawSoftRings(ctx, [{
+      x: W / 2, y: H * 0.62, r: 8 + 96 * ease.outCubic(u), maxR: 104,
+      life: 420 * (1 - u), maxLife: 420, color: '#7fe0ff',
+    }]);
+    softGlow(ctx, W / 2, H * 0.62, 18, '#ffffff', 0.35 * (1 - u));
+
+  } else if (s.kind === 'floaters') {
+    drawSoftFloaters(ctx, [{ x: W / 2, y: H * 0.46 - 16 * u, text: '-27', color: '#ff6b6b', life: 700 * (1 - u), maxLife: 700 }]);
+
+  } else if (s.kind === 'level') {
+    if (now - s.last > s.period) { s.fx.levelUp(W / 2, H * 0.74, 7); s.last = now; }
+    s.fx.update(dt); s.fx.drawBack(ctx); s.fx.drawFront(ctx);
+
+  } else {
+    const kind = s.kind === 'loot-gem' ? 'gem' : 'coin';
+    if (now - s.last > s.period) { s.fx.loot(W * 0.34, H * 0.5, kind); s.last = now; }
+    s.fx.update(dt); s.fx.drawFront(ctx);
+  }
+}
+</script>
+</body>
+</html>

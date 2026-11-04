@@ -14,12 +14,16 @@ import {
 } from './combat-core.mjs';
 import { LEARN_CARDS } from './cards.mjs';
 import { has } from '../status/status-system.mjs';
+import { SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters } from './soft-fx.mjs';
 
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const DPR = Math.min(window.devicePixelRatio || 1, 2); // 12 册硬指标：DPR≤2 控内存
 
 let world = createWorld();
+// 柔和卡通特效层（2026-11-04）：借 pixelfx 的加色辉光/色阶/相位编排，纯 Canvas2D JS 实现。
+// 只读 world，不写 world；自建实例池由渲染层触发，逻辑层零改动。
+const softFx = new SoftFx({ seed: 20261104, lootTarget: { x: 44, y: 22 } });
 let lastT = performance.now();
 let acc = 0;
 const STEP = 1000 / 60; // 固定步长 16.67ms，手感与帧率解耦
@@ -138,6 +142,7 @@ canvas.addEventListener('pointerdown', (e) => {
 
 function startGame(custom = false) {
   world = createWorld();
+  softFx.reset();                       // 重开一局：清掉上一局残留的升级/掉落特效
   world.customMode = !!custom;
   world.running = true; world.started = true;
   selectCustom = !!custom;
@@ -151,7 +156,8 @@ function frame(now) {
   const dt = Math.min(now - lastT, 100);
   lastT = now;
   acc += dt;
-  while (acc >= STEP) { update(world, STEP); acc -= STEP; }
+  // 特效层跟随同一个固定步长推进 → 与帧率解耦、确定性（对齐 pixelfx 的 120Hz 细分思路）
+  while (acc >= STEP) { update(world, STEP); softFx.update(STEP); acc -= STEP; }
   fpsAccum += dt; fpsFrames++;
   if (fpsAccum >= 500) { fps = Math.round((fpsFrames * 1000) / fpsAccum); fpsAccum = 0; fpsFrames = 0; }
   render();
@@ -162,7 +168,9 @@ function frame(now) {
 function render() {
   ctx.clearRect(0, 0, WORLD.W, WORLD.H);
   ctx.lineJoin = 'round'; ctx.lineCap = 'round'; // 全局柔边笔触（2026-11-04 画风落地）
+  softFx.syncWorld(world);   // 只读侦测升级/击杀，触发柔和特效
   drawBackground();
+  softFx.drawBack(ctx);      // back 层：地面光板 / 环远半，在角色之后（纵深）
   drawStorms();
   drawFlames();     // 地面火区（在敌人之下）
   drawRings();
@@ -186,6 +194,7 @@ function render() {
   if (world.panelOpen) drawCardPanel();
   if (!world.started) drawStartOverlay();
   if (world.gameOver) drawGameOver();
+  softFx.drawFront(ctx);     // front 层：光柱 / 逐字标题 / 掉落道具，叠在最上
 }
 
 function roundRect(x, y, w, h, r) {
@@ -896,33 +905,11 @@ function drawStrikes() {
   }
 }
 
-function drawParticles() {
-  for (const p of world.particles) {
-    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
-    ctx.fillStyle = p.color;
-    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawRings() {
-  for (const r of world.rings) {
-    ctx.globalAlpha = Math.max(0, r.life / r.maxLife) * 0.7;
-    ctx.strokeStyle = r.color; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2); ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawFloaters() {
-  ctx.textAlign = 'center'; ctx.font = 'bold 12px sans-serif';
-  for (const f of world.floaters) {
-    ctx.globalAlpha = Math.max(0, f.life / f.maxLife);
-    ctx.fillStyle = f.color;
-    ctx.fillText(f.text, f.x, f.y);
-  }
-  ctx.globalAlpha = 1;
-}
+// 以下三个函数保留原名与调用点，实现换成柔和卡通版重绘（读 world 状态、纯函数、帧率无关）。
+// 编排对齐 pixelfx：白热 hero frame → 扩散/弹出 → 冷却/挤压 → 余晖消散，快起慢收。
+function drawParticles() { drawSoftParticles(ctx, world.particles); }
+function drawRings() { drawSoftRings(ctx, world.rings); }
+function drawFloaters() { drawSoftFloaters(ctx, world.floaters); }
 
 function drawHUD() {
   // 顶部信息条
