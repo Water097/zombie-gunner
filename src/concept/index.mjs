@@ -6,7 +6,7 @@
 
 import { createFrame, clearFrame, createFx, composite } from '../../vendor/pixelfx/src/core/index.js';
 import { PAL } from '../../vendor/pixelfx/src/core/color.js';
-import { ENEMY_EFFECTS } from './enemies.mjs';
+import { ENEMY_EFFECTS, DEATH_EFFECTS } from './enemies.mjs';
 import { WEAPON_EFFECTS, GEAR_EFFECTS } from './equipment.mjs';
 import { SKILL_EFFECTS } from './skills.mjs';
 import { ACTOR_EFFECTS } from './misc.mjs';
@@ -71,7 +71,8 @@ const VFX = [
 ];
 
 export const CATALOG = [
-  { id: 'enemies', title: '敌人类别', sub: '机制沿用 05 册已定稿的 8 种敌人，只换叫法与形态。色相 / 体量 / 内部结构 / 动作频率 四层重新承担「哪个会炸、哪个远程」的判断信息。', items: [ORIGINAL_SLIME, ...ENEMY_EFFECTS] },
+  { id: 'enemies', title: '敌人类别', sub: '机制沿用 05 册已定稿的 8 种敌人。第二版复用 critters 内核降噪，并按各自机制拆出独立剪影与运动模型：方壳 / 梭形 / 尖刺球 / 钟形塔 / 水母伞 / 三小团 / 双瓣葫芦——8 种里只有 1 种还在跳。', items: [ORIGINAL_SLIME, ...ENEMY_EFFECTS] },
+  { id: 'enemy-death', title: '敌人类别 · 死亡效果', sub: 'one-shot 击杀反馈，8 种各自读得出不同信息。自爆故意做成「哑弹泄气」而不是爆炸，避免与「抵线自爆炸要塞」混淆。全部以空帧结束，可直接被 fx.done() 回收。', items: DEATH_EFFECTS },
   { id: 'weapons', title: '武器类别', sub: '06 册 6 把型号（名称照抄文档）。枪管长度、弹匣、射速与弹丸数就是每把枪的性格；品级 6 档与型号正交，不额外画 36 把。', items: WEAPON_EFFECTS },
   { id: 'gear', title: '装备类别', sub: '07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）。武器独立成系统，不占装备格；同部位只能穿 1 件。', items: GEAR_EFFECTS },
   { id: 'skills', title: '技能类别', sub: '02 册 9 个技能。球体颜色读系别，中心符号读形态——避免 9 个发光球长一个样。局内 4 槽上限，一局只选 4 条线。', items: SKILL_EFFECTS },

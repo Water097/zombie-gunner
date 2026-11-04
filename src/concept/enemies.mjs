@@ -458,3 +458,161 @@ export const ENEMY_EFFECTS = Object.keys(CFG).map((id) => {
     mod: build(id),
   };
 });
+
+// ─────────────────────────────────────────────────────────────
+// 死亡效果（one-shot，简单，ending empty）
+//
+// 设计口径：死亡是 moment-to-moment 循环里的反馈通道，每种要读出不同信息。
+// 自爆故意做成「哑弹泄气」而不是爆炸：抵线自爆是炸要塞的，若被击杀时也炸，
+// 玩家分不清「我拆弹成功」还是「它炸了」。这里让玩家读到前者。
+//
+// 视觉纪律延续上一版：半透明一律走 p.blend 真混合（softShape），
+// 不用 p.circle/ellipse/poly 的 a<1（那些走 Bayer dither，会抖出噪点）。
+// one-shot 必须以空帧结束；fade 在 u=0.94 就归零，不留残影。
+
+const DEATH = {
+  normal:   { d: 0.72, name: '化水',       read: '压成一摊水洼 + 4 颗水滴抛物线 + 扩散光环' },
+  swift:    { d: 0.62, name: '惯性冲散',   read: '沿滑行方向拉成丝 → 断成 3 段向右飞散' },
+  armor:    { d: 0.85, name: '外壳崩裂',   read: '硬壳裂成 4 块圆角方片翻飞 + 内部果冻泄出塌下' },
+  bomber:   { d: 0.78, name: '哑弹泄气',   read: '引信熄灭 → 漏气缩小晃两下 → 一缕烟（不爆炸）' },
+  ranged:   { d: 0.80, name: '法球坠落',   read: '头顶法球失控砸地碎裂 + 塔身向一侧塌陷' },
+  swarm:    { d: 0.70, name: '逐个啵掉',   read: '3 团错开 0.14s 依次弹灭，强调数量而非同时消失' },
+  flyer:    { d: 0.82, name: '伞盖泄气',   read: '伞盖变扁、触须收拢、向上飘散（不落地）' },
+  splitter: { d: 0.86, name: '两瓣各自化掉', read: '中缝裂开 → 左右各自移开缩小（呼应分裂机制但不生成实体）' },
+};
+
+/** 真半透明的超椭圆填充：n=2 椭圆、n=5 圆角方。逐点 blend，无 dither 网点，可平滑渐隐。 */
+function softShape(p, cx, cy, rx, ry, c, a, n = 2) {
+  if (a <= 0 || rx <= 0 || ry <= 0) return;
+  const X = Math.ceil(rx), Y = Math.ceil(ry);
+  for (let y = -Y; y <= Y; y++)
+    for (let x = -X; x <= X; x++) {
+      const d = Math.pow(Math.abs(x) / rx, n) + Math.pow(Math.abs(y) / ry, n);
+      if (d > 1) continue;
+      p.blend(cx + x, cy + y, c, a * clamp(1 - 0.18 * d));
+    }
+}
+
+function deathFx(p, t, id) {
+  const cfg = CFG[id], D = DEATH[id], C = fit(cfg.r, 7);
+  const u = clamp(t / D.d);
+  const flash = 1 - smooth(0, 0.09, u);          // 1~2 帧白热 hero frame
+  const A = 1 - smooth(0.64, 0.96, u);           // 主体停留更久；0.96 之后彻底空，保证 ending empty
+  const W = cfg.W, H = cfg.H, cy = -H * 0.5;
+
+  if (flash > 0.02) {
+    p.disc(0, cy, W * (0.42 + 0.16 * flash), C[6], 0.55 * flash);
+    p.glow(0, cy, W * 1.1, C[5], 0.42 * flash);
+  }
+  if (u >= 0.96 || A <= 0) return;
+
+  switch (id) {
+    case 'normal': {                              // 化水
+      const k = ease.outCubic(clamp(u / 0.62));
+      softShape(p, 0, -2, W * (0.44 + 0.40 * k), Math.max(1, H * 0.42 * (1 - k)), C[4], 0.90 * A);
+      softShape(p, 0, -2, W * (0.30 + 0.30 * k), Math.max(1, H * 0.28 * (1 - k)), C[5], 0.45 * A);
+      p.glowRing(0, -2, 10 + 34 * k, 3, C[4], 0.34 * A);
+      for (let i = 0; i < 4; i++) {
+        const s = i % 2 ? 1 : -1;
+        const f = toss(0, -4, s * (24 + i * 7), -46 - i * 5, u * D.d, 420, -1);
+        if (!f.landed) softShape(p, f.x, f.y, 2, 2, C[5], 0.80 * A);
+      }
+      break;
+    }
+    case 'swift': {                               // 惯性冲散
+      const k = ease.outExpo(clamp(u / 0.60));
+      softShape(p, -8 - 22 * k, cy, W * 0.52 + 26 * k, Math.max(1, H * 0.42 * (1 - k)), C[4], 0.85 * A);
+      for (let i = 0; i < 3; i++) {
+        const x = 6 + (16 + 18 * i) * k;
+        softShape(p, x, cy + (i - 1) * 2, Math.max(0.6, 5 - 3 * k), Math.max(0.6, 4 - 2.5 * k), C[5], 0.75 * A);
+      }
+      p.glow(-14 - 18 * k, cy, 18, C[3], 0.22 * A);
+      break;
+    }
+    case 'armor': {                               // 外壳崩裂
+      const k = ease.outCubic(clamp(u / 0.75));
+      for (let i = 0; i < 4; i++) {
+        const a = -0.6 + i * 0.65;
+        const dx = Math.cos(a) * (8 + 30 * k), dy = Math.sin(a) * (8 + 22 * k) - 6 * k * k;
+        softShape(p, dx, cy + dy, Math.max(0.6, 6 - 2 * k), Math.max(0.6, 5 - 2 * k), C[3], 0.95 * A, 5);
+      }
+      softShape(p, 0, -3, W * (0.36 + 0.20 * k), Math.max(1, H * 0.36 * (1 - k)), C[4], 0.70 * A);
+      p.glowRing(0, -2, 8 + 26 * k, 2.5, C[2], 0.30 * A);
+      break;
+    }
+    case 'bomber': {                              // 哑弹泄气（不爆炸）
+      const k = ease.outCubic(clamp(u / 0.80));
+      const wob = Math.sin(u * TAU * 3) * Math.exp(-u * 4) * (1 - k);
+      const r = Math.max(1, W * 0.46 * (1 - 0.72 * k));
+      softShape(p, wob * 5, cy + H * 0.22 * k, r, Math.max(1, r * (1 - 0.25 * k)), C[3], 0.90 * A);
+      if (u < 0.18) p.disc(wob * 5, cy - H * 0.52, Math.max(0.5, 2 * (1 - u / 0.18)), C[6], 0.8);
+      for (let i = 0; i < 3; i++) {
+        const sy = cy - H * 0.5 - (6 + 18 * k) - i * 5;
+        softShape(p, wob * 5 + Math.sin(u * 5 + i) * 2, sy, 2.5 + i * 0.8, 2.5 + i * 0.8, C[2], 0.28 * A * (1 - i * 0.25));
+      }
+      break;
+    }
+    case 'ranged': {                              // 法球坠落
+      const k = ease.outCubic(clamp(u / 0.72));
+      softShape(p, 5 * k, cy + H * 0.18 * k, W * 0.42 * (1 - 0.30 * k), Math.max(1, H * 0.46 * (1 - 0.70 * k)), C[4], 0.85 * A);
+      const fy = cy - H * 0.62 + 30 * Math.pow(clamp(u / 0.55), 2);
+      if (u < 0.62) {
+        p.disc(2 * k, fy, Math.max(0.5, 4 * (1 - 0.4 * k)), C[5], 0.90 * A);
+        p.glow(2 * k, fy, 10, C[4], 0.30 * A);
+      }
+      p.glowRing(2 * k, -1, 4 + 16 * k, 2, C[4], 0.30 * A);
+      break;
+    }
+    case 'swarm': {                               // 逐个啵掉
+      for (let i = 0; i < 3; i++) {
+        const t0 = i * 0.14, k = (u - t0) / 0.30;
+        if (k <= 0 || k >= 1) continue;
+        const x = -14 + i * 13, r = Math.max(0.5, 6 * (1 - k));
+        softShape(p, x, -14 + 3 * Math.sin(u * TAU + i), r, r, C[5], 0.90 * (1 - k));
+        p.glowRing(x, -14, 2 + 10 * k, 2, C[4], 0.35 * (1 - k));
+      }
+      break;
+    }
+    case 'flyer': {                               // 伞盖泄气飘散
+      const k = ease.outCubic(clamp(u / 0.85));
+      softShape(p, 2 * k, -30 - 12 * k, W * 0.46 * (1 - 0.35 * k), Math.max(1, H * 0.40 * (1 - 0.75 * k)), C[4], 0.80 * A);
+      for (let i = 0; i < 4; i++) {
+        const bx = (i - 1.5) * 5 * (1 - k);
+        p.glowLine(bx, -30 - 12 * k, bx * 0.6, -30 - 12 * k + 8 * (1 - k), 2, C[5], 0.35 * A);
+      }
+      for (let i = 0; i < 3; i++)
+        softShape(p, Math.sin(u * 4 + i) * 3, -34 - 18 * k - i * 6, 2 + i * 0.5, 2 + i * 0.5, C[5], 0.35 * A);
+      break;
+    }
+    case 'splitter': {                            // 两瓣各自化掉
+      const k = ease.outCubic(clamp(u / 0.80));
+      for (const s of [-1, 1]) {
+        const x = s * (5 + 14 * k);
+        softShape(p, x, cy + H * 0.15 * k, Math.max(1, W * 0.24 * (1 - 0.70 * k)),
+          Math.max(1, H * 0.42 * (1 - 0.60 * k)), C[4], 0.85 * A);
+        p.glow(x, cy, 10 * (1 - k), C[4], 0.25 * A);
+      }
+      break;
+    }
+  }
+}
+
+export const DEATH_EFFECTS = Object.keys(CFG).map((id) => {
+  const c = CFG[id], d = DEATH[id];
+  return {
+    id: `death-${id}`,
+    name: `${c.name} · ${d.name}`,
+    spec: d.read,
+    mech: `击杀反馈：${d.name}`,
+    read: d.read,
+    source: '内核新写（one-shot，复用 critters 内核）',
+    demoHook: `killEnemy('${id}') → createFx(deathModule)`,
+    mod: {
+      meta: frameMeta(`${c.name} · ${d.name}`, W_CANVAS, H_CANVAS, {
+        desc: d.read, tags: ['enemy', 'death', id],
+        duration: d.d, loop: false, fps: 30, oy: H_CANVAS - 14,
+      }),
+      draw: (p, t) => deathFx(p, t, id),
+    },
+  };
+});
