@@ -7,7 +7,8 @@
 import { createFrame, clearFrame, createFx, composite } from '../../vendor/pixelfx/src/core/index.js';
 import { PAL } from '../../vendor/pixelfx/src/core/color.js';
 import { ENEMY_EFFECTS, DEATH_EFFECTS } from './enemies.mjs';
-import { WEAPON_EFFECTS, GEAR_EFFECTS } from './equipment.mjs';
+import { GEAR_EFFECTS } from './equipment.mjs';
+import { WEAPON_EFFECTS, BULLET_EFFECTS, BULLET_ATTR_EFFECTS, WEAPON_BLAST_EFFECTS } from './weapons.mjs';
 import { SKILL_EFFECTS } from './skills.mjs';
 import { ACTOR_EFFECTS } from './misc.mjs';
 
@@ -73,7 +74,10 @@ const VFX = [
 export const CATALOG = [
   { id: 'enemies', title: '敌人类别', sub: '机制沿用 05 册已定稿的 8 种敌人。第二版复用 critters 内核降噪，并按各自机制拆出独立剪影与运动模型：方壳 / 梭形 / 尖刺球 / 钟形塔 / 水母伞 / 三小团 / 双瓣葫芦——8 种里只有 1 种还在跳。', items: [ORIGINAL_SLIME, ...ENEMY_EFFECTS] },
   { id: 'enemy-death', title: '敌人类别 · 死亡效果', sub: 'one-shot 击杀反馈，8 种各自读得出不同信息。自爆故意做成「哑弹泄气」而不是爆炸，避免与「抵线自爆炸要塞」混淆。全部以空帧结束，可直接被 fx.done() 回收。', items: DEATH_EFFECTS },
-  { id: 'weapons', title: '武器类别', sub: '06 册 6 把型号（名称照抄文档）。枪管长度、弹匣、射速与弹丸数就是每把枪的性格；品级 6 档与型号正交，不额外画 36 把。', items: WEAPON_EFFECTS },
+  { id: 'weapons', title: '武器类别 · 6 把型号', sub: '第二版按弹道形态重画：每把独立剪影 + 独立射击节奏（后坐 / 泵动 / 拉栓 / 起转 / 装填），不再只换颜色。名称照抄 06 册；品级 6 档与型号正交，不额外画 36 把。', items: WEAPON_EFFECTS },
+  { id: 'weapon-bullets', title: '武器类别 · 子弹与弹道', sub: '06 册 3.2 弹道卡（双发 / 散射 / 穿透 / 追踪 / 弹射）+ 基础弹种。消耗模型：弹夹 = 扳机 tick，加弹道只改形态、不改换弹节奏。', items: BULLET_EFFECTS },
+  { id: 'weapon-attrs', title: '武器类别 · 子弹属性', sub: '06 册 3.2.1 的 7 张定稿卡（火属性弹头 / 爆炸弹头 / 爆炸范围+100% / 命中分裂 / 子子弹 20% / +30% / 子子弹爆炸）。只作用主武器子弹，与 9 技能是两套独立系统。', items: BULLET_ATTR_EFFECTS },
+  { id: 'weapon-blasts', title: '武器类别 · 爆炸与命中', sub: '武器侧的爆炸：枪口闪光、榴弹落点大爆、精确步枪穿透余痕；末 2 张是原库 impacts/hit-spark 与 explosions/small-explosion 的对照。', items: WEAPON_BLAST_EFFECTS },
   { id: 'gear', title: '装备类别', sub: '07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）。武器独立成系统，不占装备格；同部位只能穿 1 件。', items: GEAR_EFFECTS },
   { id: 'skills', title: '技能类别', sub: '02 册 9 个技能。球体颜色读系别，中心符号读形态——避免 9 个发光球长一个样。局内 4 槽上限，一局只选 4 条线。', items: SKILL_EFFECTS },
   { id: 'currency', title: '货币与掉落', sub: '你没点名但概念图必须有的类别。3 种晶体是同一个原库特效换 palette 得到的，正好演示「重着色不改代码」。', items: CURRENCY },
