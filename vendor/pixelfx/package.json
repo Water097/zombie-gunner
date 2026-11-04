@@ -1,0 +1,7 @@
+{
+  "name": "pixelfx-vendor",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "description": "Vendored pixelfx core + effects (MIT). Kept so Node treats the .js sources as ESM; browsers use the MIME type instead."
+}

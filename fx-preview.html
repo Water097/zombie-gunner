@@ -3,145 +3,228 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>特效对照 · pixelfx 内核 → 柔和卡通版</title>
+<title>概念图库 · 像素风（pixelfx 内核）</title>
 <style>
-  :root{ --bg:#0d171b; --panel:#142127; --line:#2a3d44; --txt:#e7eefc; --dim:#8fa6b6; --accent:#7fe0ff; }
+  :root{
+    --bg:#0a1016; --panel:#111c24; --line:#2a3d44; --line2:#3b5560;
+    --txt:#e7eefc; --dim:#8fa6b6; --cy:#7fe0ff; --gold:#ffd257; --grn:#8fe08f; --red:#ff8a7a;
+  }
   *{box-sizing:border-box}
-  body{margin:0;padding:28px 24px 60px;background:radial-gradient(1200px 600px at 50% -10%,#1b3038,#0d171b 70%);color:var(--txt);font:14px/1.6 "PingFang SC","Microsoft YaHei",sans-serif}
-  h1{font-size:24px;margin:0 0 6px}
-  .lead{color:var(--dim);max-width:1000px;margin:0}
+  body{
+    margin:0;padding:0 0 80px;color:var(--txt);
+    font:13px/1.65 ui-monospace,Consolas,"Microsoft YaHei",monospace;
+    background:
+      repeating-linear-gradient(0deg,transparent 0 7px,rgba(127,224,255,.025) 7px 8px),
+      repeating-linear-gradient(90deg,transparent 0 7px,rgba(127,224,255,.025) 7px 8px),
+      var(--bg);
+  }
+  header{padding:26px 24px 18px;border-bottom:2px solid var(--line2);background:#0d1720}
+  h1{font-size:22px;margin:0 0 6px;letter-spacing:1px}
+  h1 b{color:var(--gold)}
+  .lead{color:var(--dim);max-width:1100px;margin:0;font-size:12px}
   .lead b{color:var(--txt)}
-  .bar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:14px 0 22px}
-  .note{color:#ffd98a;background:rgba(255,217,138,.08);border:1px solid rgba(255,217,138,.25);padding:8px 12px;border-radius:8px;font-size:12px}
-  a.btn{display:inline-block;padding:8px 14px;border-radius:8px;background:rgba(127,224,255,.14);border:1px solid rgba(127,224,255,.4);color:#bff0ff;text-decoration:none;font-size:12px}
-  a.btn:hover{background:rgba(127,224,255,.24)}
-  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;max-width:1440px}
-  .case{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px;overflow:hidden}
-  .case h2{font-size:15px;margin:0 0 4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  .case h2 span{font-size:11px;color:var(--dim);font-weight:400}
-  .pair{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}
-  .col{min-width:0}
-  .tag{font-size:11px;color:var(--dim);margin:0 0 6px;display:flex;justify-content:space-between;gap:6px}
-  .tag b{color:var(--accent);font-weight:600}
-  .frame{width:100%;aspect-ratio:16/9;background:#0b1116;border:1px solid #22323a;border-radius:10px;overflow:hidden;display:block}
-  img.frame{object-fit:contain;image-rendering:pixelated}
-  canvas.frame{display:block}
-  .desc{font-size:11px;color:var(--dim);margin-top:8px;line-height:1.55}
-  code{color:#bff0ff;font-family:ui-monospace,Consolas,monospace}
-  @media(max-width:980px){.grid{grid-template-columns:1fr}}
+  .bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 10px}
+  button,a.btn{
+    display:inline-block;padding:7px 12px;border:2px solid var(--line2);border-radius:0;
+    background:#16242e;color:var(--txt);font:inherit;font-size:12px;text-decoration:none;cursor:pointer;
+    box-shadow:3px 3px 0 #050a0e;
+  }
+  button:hover,a.btn:hover{background:#1d3340;border-color:var(--cy);color:var(--cy)}
+  button:active,a.btn:active{box-shadow:0 0 0;transform:translate(3px,3px)}
+  button.on{background:#243c2c;border-color:var(--grn);color:var(--grn)}
+  .stat{color:var(--gold);font-size:12px;border:2px solid #4a3c18;background:#1a160c;padding:6px 10px;box-shadow:3px 3px 0 #050a0e}
+  .note{color:var(--cy);background:#0d2029;border-left:4px solid var(--cy);padding:9px 12px;font-size:12px;max-width:1100px}
+  .note b{color:#fff}
+  nav{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
+  nav a{font-size:11px;color:var(--dim);border:1px solid var(--line);padding:4px 8px;text-decoration:none;background:#111c24}
+  nav a:hover{color:var(--cy);border-color:var(--cy)}
+  code{color:var(--cy);font-family:ui-monospace,Consolas,monospace;font-size:11px}
+
+  main{padding:0 24px}
+  section.cat{margin-top:34px;scroll-margin-top:12px}
+  .cat-head{border-left:5px solid var(--gold);padding:2px 0 2px 12px;margin-bottom:14px}
+  .cat-head h2{font-size:17px;margin:0;display:inline-block;letter-spacing:1px}
+  .cat-head .count{color:var(--gold);font-size:11px;border:1px solid #4a3c18;padding:2px 7px;margin-left:10px;background:#1a160c}
+  .cat-head p{color:var(--dim);font-size:12px;margin:6px 0 0;max-width:1100px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(216px,1fr));gap:12px}
+  .card{background:var(--panel);border:2px solid var(--line);padding:10px;cursor:pointer;position:relative;box-shadow:4px 4px 0 #050a0e}
+  .card:hover{border-color:var(--cy)}
+  .card.paused{border-color:var(--red);opacity:.72}
+  .card.paused::after{content:"已暂停";position:absolute;top:12px;right:12px;color:var(--red);font-size:11px;border:1px solid var(--red);padding:1px 5px;background:#1a0f0f}
+  .stage{
+    width:100%;aspect-ratio:4/3;background:#0a1418;border:1px solid #22323a;
+    display:flex;align-items:center;justify-content:center;overflow:hidden;position:relative;
+    background-image:
+      repeating-linear-gradient(0deg,transparent 0 15px,rgba(127,224,255,.035) 15px 16px),
+      repeating-linear-gradient(90deg,transparent 0 15px,rgba(127,224,255,.035) 15px 16px);
+  }
+  .stage canvas{width:100%;height:100%;object-fit:contain;image-rendering:pixelated;display:block}
+  .badge{position:absolute;bottom:6px;left:6px;font-size:10px;padding:1px 6px;border:1px solid;background:#0a1418}
+  .badge.new{color:var(--grn);border-color:#2f6140}
+  .badge.borrow{color:var(--gold);border-color:#5c4a18}
+  .card h3{font-size:13px;margin:9px 0 3px;color:var(--txt)}
+  .card .spec{font-size:11px;color:var(--dim);margin:0 0 4px;min-height:18px}
+  .card .mech{font-size:11px;color:var(--cy);margin:0 0 3px}
+  .card .read{font-size:11px;color:var(--gold);margin:0 0 4px}
+  .card code{display:block;font-size:10px;color:#9fb6c4;word-break:break-all;margin-top:5px}
+  .card .src{font-size:10px;color:#6d8391;margin-top:4px;border-top:1px dashed var(--line);padding-top:4px}
+  .refgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+  .refcard{background:var(--panel);border:2px solid var(--line);padding:10px}
+  .refcard img{width:100%;display:block;image-rendering:pixelated;border:1px solid #22323a;background:#0a1418}
+  .refcard h3{font-size:12px;margin:8px 0 0;color:var(--dim)}
+  footer{margin:40px 24px 0;border-top:2px solid var(--line2);padding-top:16px;color:var(--dim);font-size:12px;max-width:1100px}
+  footer h2{color:var(--txt);font-size:15px;margin:0 0 8px}
+  footer ol{padding-left:20px;margin:0}
+  footer li{margin-bottom:5px}
+  @media(max-width:640px){.grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr))}}
 </style>
 </head>
 <body>
-<h1>特效对照 · 只借内核与编排，画风换成柔和卡通</h1>
-<p class="lead">左：<b>pixelfx 原库原样</b>（硬像素风：1px 网格、抖动网点、像素字、白热星芒）。右：<b>纯 Canvas2D JS 现写的柔和版</b> —— 零图片素材，加色辉光、深→亮色阶、seeded 随机、相位编排、前后分层全部对齐，只是把像素画刷换成径向渐变与圆头笔触。</p>
-<div class="bar">
-  <div class="note">右侧是<b>实时运行</b>的，不是截图：和 demo 用的是同一份 <code>src/demo/soft-fx.mjs</code>。逻辑层一行未改。</div>
-  <a class="btn" href="index.html">→ 打开 demo 实机</a>
-</div>
-<div class="grid" id="grid"></div>
+<header>
+  <h1>概念图库 · <b>像素风</b>（pixelfx 内核）</h1>
+  <p class="lead">全部改用 <b>pixelfx 的硬像素画刷</b>：1px 网格、4×4 Bayer dither、深→亮色阶、加色 light 缓冲、seeded 随机。本轮 <b>demo 一行未改</b>，先把概念图分门别类摆出来，你逐个调完再上实机。</p>
+  <div class="bar">
+    <span class="stat" id="stat">载入中…</span>
+    <button id="toggle">⏸ 全部暂停</button>
+    <button id="speed">速度 ×1</button>
+    <a class="btn" href="index.html">→ 打开 demo 实机</a>
+  </div>
+  <div class="note"><b>每个格子都是实时运行的 pure effect 模块，不是图片、不是截图。</b> 它们和 pixelfx 自带 232 个特效走同一条 <code>createFrame → createFx → composite → putImageData</code> 管线；把模块从这里的 canvas 挪进 demo 的 render 循环，绘制代码一行都不用改。点击任意卡片可单独暂停对照。</div>
+  <nav id="nav"></nav>
+</header>
+
+<main id="main"></main>
+
+<footer>
+  <h2>上 demo 时还差什么（不吹「自动同步」）</h2>
+  <ol>
+    <li><b>宿主画布</b>：demo 现在是 Canvas2D 路径绘制，像素缓冲要挂到一张离屏低分辨率画布，再 <code>drawImage</code> 整数倍放大进主画布；同时处理 DPR 与 <code>image-rendering: pixelated</code>。</li>
+    <li><b>绘制层级</b>：<code>draw(frame,"back")</code> 放角色之后、<code>draw(frame,"front")</code> 放最前；角色/敌人本体要不要也改成像素缓冲，是个独立决定（本轮没动）。</li>
+    <li><b>时间驱动</b>：demo 固定步长循环里加 <code>fx.update(dt)</code>；one-shot 用 <code>fx.done()</code> 回收，loop 用 <code>fx.stop()</code> 淡出。</li>
+    <li><b>坐标与生命周期</b>：把 <code>world.particles / rings / floaters / 击杀点</code> 映射到局部原点，按事件挂 <code>createFx</code>。</li>
+  </ol>
+  <p>原库源码：<code>vendor/pixelfx/</code>（MIT，含 LICENSE / NOTICE.md）。我们新写：<code>src/concept/</code>。左侧原库帧图对照：<code>assets/fx-ref/</code>。</p>
+</footer>
 
 <script type="module">
-import {
-  SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters,
-  softStar, softGlow, ease, Rng,
-} from './src/demo/soft-fx.mjs';
+import { CATALOG, REFS, makeRenderer } from './src/concept/index.mjs';
 
-const W = 320, H = 180, SCALE = 2;
-// 左侧用「6 帧精选」紧凑版（--max 6 --zoom 3），避免 16 帧宽幅在 16:9 框里被压得看不清
-// 对照图已随仓库自带（assets/fx-ref/），不依赖本机未跟踪的第三方库目录
-const REF = (p) => `assets/fx-ref/${p}.png`;
+const main = document.getElementById('main');
+const nav = document.getElementById('nav');
+const cards = [];
+let borrowed = 0, fresh = 0;
 
-const CASES = [
-  { id:'spark', title:'命中火花', tag:'impacts/hit-spark', period:1100, kind:'particles', src:REF('impacts/hit-spark'),
-    desc:'白热 hero frame → 沿速度方向拉伸的亮尾 → 沿色阶冷却变色 → 余晖消散。' },
-  { id:'ring', title:'冲击环 / 技能落点', tag:'ice/frost-nova', period:900, kind:'rings', src:REF('ice/frost-nova'),
-    desc:'白热起手 + 地面透视环（远半暗 / 近半亮）+ 内亮细环 + 余晖；环内自带纵深分层。' },
-  { id:'number', title:'伤害飘字', tag:'ui/damage-number', period:900, kind:'floaters', src:REF('ui/damage-number'),
-    desc:'白帧 → outBack 弹出放大 → 落地 squash 挤压 → 上浮保持 → 淡出。' },
-  { id:'level', title:'升级 LEVEL UP', tag:'ui/level-up', period:2600, kind:'level', src:REF('ui/level-up'),
-    desc:'蓄力收环 → 白热闪光 → 光柱+三轮上升环 → LEVEL UP! 逐字落下 → 星芒保持 → 消散。' },
-  { id:'coin', title:'金币 / 技能碎片', tag:'pickups/coin-spin', period:1500, kind:'loot-coin', src:REF('pickups/coin-spin'),
-    desc:'闪白出现 → 悬浮旋转（横向缩放模拟绕竖轴）→ 拖尾飞向 HUD 分数 → 收集爆闪。' },
-  { id:'gem', title:'宝石', tag:'pickups/gem-spin', period:1500, kind:'loot-gem', src:REF('pickups/gem-spin'),
-    desc:'同一套编排只换主色即得紫宝石：六边切面 + 高光扫过 + 旋转。' },
-];
+for (const cat of CATALOG) {
+  const navA = document.createElement('a');
+  navA.href = `#${cat.id}`;
+  navA.textContent = `${cat.title} (${cat.items.length})`;
+  nav.appendChild(navA);
 
-const grid = document.getElementById('grid');
-const states = CASES.map((c) => {
-  const el = document.createElement('div');
-  el.className = 'case';
-  el.innerHTML = `
-    <h2>${c.title} <span>${c.tag}</span></h2>
-    <div class="pair">
-      <div class="col"><div class="tag"><span>原库 · 硬像素风</span><b>pixelfx</b></div><img class="frame" src="${c.src}" alt="${c.title} 原版帧图"></div>
-      <div class="col"><div class="tag"><span>柔和卡通版 · 实时</span><b>soft-fx.mjs</b></div><canvas class="frame" width="${W*SCALE}" height="${H*SCALE}"></canvas></div>
-    </div>
-    <div class="desc">${c.desc}</div>`;
-  grid.appendChild(el);
-  const ctx = el.querySelector('canvas').getContext('2d');
-  ctx.setTransform(SCALE, 0, 0, SCALE, 0, 0);
-  return {
-    ...c, ctx,
-    fx: new SoftFx({ seed: 20261104, lootTarget: { x: W * 0.76, y: H * 0.26 } }),
-    last: -1e9,
-  };
-});
+  const sec = document.createElement('section');
+  sec.className = 'cat';
+  sec.id = cat.id;
+  const head = document.createElement('div');
+  head.className = 'cat-head';
+  head.innerHTML = `<h2>${cat.title}</h2><span class="count">${cat.items.length} 张</span><p>${cat.sub}</p>`;
+  sec.appendChild(head);
 
-let last = performance.now();
+  const grid = document.createElement('div');
+  grid.className = 'grid';
+  for (const item of cat.items) {
+    const isBorrow = item.source.startsWith('现成');
+    if (isBorrow) borrowed++; else fresh++;
+    const r = makeRenderer(item);
+    const el = document.createElement('article');
+    el.className = 'card';
+    el.innerHTML = `
+      <div class="stage">
+        <canvas width="${r.w}" height="${r.h}"></canvas>
+        <span class="badge ${isBorrow ? 'borrow' : 'new'}">${isBorrow ? '现成借鉴' : '内核新写'}</span>
+      </div>
+      <h3>${item.name}</h3>
+      <p class="spec">${item.spec || ''}</p>
+      ${item.mech ? `<p class="mech">${item.mech}</p>` : ''}
+      ${item.read ? `<p class="read">读法：${item.read}</p>` : ''}
+      <code>${item.demoHook || ''}</code>
+      <div class="src">${item.source}</div>`;
+    const ctx = el.querySelector('canvas').getContext('2d', { alpha: true });
+    const card = { r, ctx, el, visible: false, paused: false };
+    el._card = card;
+    el.addEventListener('click', () => {
+      card.paused = !card.paused;
+      el.classList.toggle('paused', card.paused);
+    });
+    grid.appendChild(el);
+    cards.push(card);
+  }
+  sec.appendChild(grid);
+  main.appendChild(sec);
+}
+
+// 原库帧图对照（离线渲染的 contact sheet，只作静态参照）
+{
+  const sec = document.createElement('section');
+  sec.className = 'cat';
+  sec.id = 'refs';
+  sec.innerHTML = `<div class="cat-head"><h2>原库帧图对照</h2><span class="count">${REFS.length} 张</span><p>pixelfx 原库离线渲染的 6 帧精选 contact sheet，静态图，用来核对像素密度与光效层次。</p></div>`;
+  const g = document.createElement('div');
+  g.className = 'refgrid';
+  for (const [id, name] of REFS) {
+    const c = document.createElement('div');
+    c.className = 'refcard';
+    c.innerHTML = `<img src="assets/fx-ref/${id}.png" alt="${name}"><h3>${name} · ${id}</h3>`;
+    g.appendChild(c);
+  }
+  sec.appendChild(g);
+  main.appendChild(sec);
+  const navA = document.createElement('a');
+  navA.href = '#refs';
+  navA.textContent = `原库帧图对照 (${REFS.length})`;
+  nav.appendChild(navA);
+}
+
+document.getElementById('stat').textContent =
+  `${CATALOG.length} 类 · ${cards.length} 张概念图 · ${fresh} 张内核新写 / ${borrowed} 张现成借鉴`;
+
+// 分类 section 是 JS 动态生成的：浏览器解析 HTML 时 hash 目标还不存在，
+// 直接带 #anchor 打开会定位失败（甚至被带到页尾）。生成后补一次定位。
+if (location.hash) {
+  const target = document.getElementById(decodeURIComponent(location.hash.slice(1)));
+  if (target) requestAnimationFrame(() => target.scrollIntoView({ block: 'start' }));
+}
+
+// 只渲染视口内的格子，避免 48 张 canvas 同时跑满帧
+const io = new IntersectionObserver((entries) => {
+  for (const e of entries) if (e.target._card) e.target._card.visible = e.isIntersecting;
+}, { rootMargin: '160px' });
+for (const c of cards) io.observe(c.el);
+
+let last = performance.now(), paused = false, speed = 1;
+const toggleBtn = document.getElementById('toggle');
+const speedBtn = document.getElementById('speed');
+toggleBtn.onclick = () => {
+  paused = !paused;
+  toggleBtn.textContent = paused ? '▶ 全部播放' : '⏸ 全部暂停';
+  toggleBtn.classList.toggle('on', paused);
+};
+speedBtn.onclick = () => {
+  speed = speed === 1 ? 0.5 : speed === 0.5 ? 2 : 1;
+  speedBtn.textContent = `速度 ×${speed}`;
+};
+
 function loop(now) {
-  const dt = Math.min(50, now - last); last = now;
-  for (const s of states) {
-    const ctx = s.ctx;
-    ctx.clearRect(0, 0, W, H);
-    const bg = ctx.createLinearGradient(0, 0, 0, H);
-    bg.addColorStop(0, '#132229'); bg.addColorStop(1, '#0a1216');
-    ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-    ctx.strokeStyle = 'rgba(127,224,255,0.10)'; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(0, H * 0.78); ctx.lineTo(W, H * 0.78); ctx.stroke();
-    drawCase(s, now, dt);
+  const dt = Math.min(0.05, (now - last) / 1000) * speed;
+  last = now;
+  if (!paused) {
+    for (const c of cards) {
+      if (!c.visible || c.paused) continue;
+      c.r.step(dt);
+      c.r.draw(c.ctx);
+    }
   }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);
-
-function drawCase(s, now, dt) {
-  const ctx = s.ctx, u = (now % s.period) / s.period;
-
-  if (s.kind === 'particles') {
-    const r = new Rng(7), arr = [];
-    for (let i = 0; i < 16; i++) {
-      const a = r.range(0, Math.PI * 2), sp = r.range(70, 200);
-      arr.push({
-        x: W / 2 + Math.cos(a) * sp * u * 0.18, y: H * 0.55 + Math.sin(a) * sp * u * 0.14,
-        vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-        life: 420 * (1 - u), maxLife: 420,
-        color: i % 3 === 0 ? '#ffe08a' : '#7fe0ff', size: 3,
-      });
-    }
-    drawSoftParticles(ctx, arr);
-    softGlow(ctx, W / 2, H * 0.55, 26, '#ffffff', 0.5 * (1 - u));
-    softStar(ctx, W / 2, H * 0.55, 16 * (1 - u * 0.5), '#ffffff', 0.8 * (1 - u));
-
-  } else if (s.kind === 'rings') {
-    drawSoftRings(ctx, [{
-      x: W / 2, y: H * 0.62, r: 8 + 96 * ease.outCubic(u), maxR: 104,
-      life: 420 * (1 - u), maxLife: 420, color: '#7fe0ff',
-    }]);
-    softGlow(ctx, W / 2, H * 0.62, 18, '#ffffff', 0.35 * (1 - u));
-
-  } else if (s.kind === 'floaters') {
-    drawSoftFloaters(ctx, [{ x: W / 2, y: H * 0.46 - 16 * u, text: '-27', color: '#ff6b6b', life: 700 * (1 - u), maxLife: 700 }]);
-
-  } else if (s.kind === 'level') {
-    if (now - s.last > s.period) { s.fx.levelUp(W / 2, H * 0.74, 7); s.last = now; }
-    s.fx.update(dt); s.fx.drawBack(ctx); s.fx.drawFront(ctx);
-
-  } else {
-    const kind = s.kind === 'loot-gem' ? 'gem' : 'coin';
-    if (now - s.last > s.period) { s.fx.loot(W * 0.34, H * 0.5, kind); s.last = now; }
-    s.fx.update(dt); s.fx.drawFront(ctx);
-  }
-}
 </script>
 </body>
 </html>
