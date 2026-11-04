@@ -401,37 +401,84 @@ function drawPet() {
 // 根因：造型全塞进碰撞半径 r 里，一个圆 + 高光点读不出结构。
 // 二版改为真正的 Q 版造型：大头小身 + 发光眼/嘴 + 短手 + 破衣，各型加专属特征；
 // 视觉尺寸按碰撞半径放大 ENEMY_VIS 倍（碰撞判定不变，仍用 e.radius）。
-const ENEMY_VIS = 1.3;
+// 三版（2026-11-04）：用户二轮对照概念图仍判"完全不是一个东西"——补齐概念图的
+// 五官与质感：大椭圆眼（外辉/虹膜/深瞳/高光）、张嘴小牙、斑驳皮肤、破布撕边+补丁、
+// 带手的短臂、头身比再向大头倾斜，比例放大到 1.45。
+const ENEMY_VIS = 1.45;
 
-// 衣服身体：圆角矩形 + 上下渐变 + 深青柔边
+// 衣服：圆角矩形渐变 + 破布撕边下摆（4 片垂布三角）+ 补丁
 function zombieBody(x, y, w, h, color) {
   ctx.fillStyle = OUTLINE;
   roundRect(x - w / 2 - 1.5, y - h / 2 - 1.5, w + 3, h + 3, w * 0.42); ctx.fill();
   const g = ctx.createLinearGradient(0, y - h / 2, 0, y + h / 2);
-  g.addColorStop(0, shade(color, 0.16));
-  g.addColorStop(1, shade(color, -0.3));
+  g.addColorStop(0, shade(color, 0.14));
+  g.addColorStop(1, shade(color, -0.28));
   ctx.fillStyle = g;
   roundRect(x - w / 2, y - h / 2, w, h, w * 0.42); ctx.fill();
-}
-// 垂在身侧的两只短手
-function zombieArms(x, y, w, R, skin) {
-  ctx.fillStyle = skin;
-  ctx.beginPath(); ctx.ellipse(x - w / 2 - R * 0.1, y - R * 0.05, R * 0.15, R * 0.26, 0.3, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(x + w / 2 + R * 0.1, y - R * 0.05, R * 0.15, R * 0.26, -0.3, 0, Math.PI * 2); ctx.fill();
-}
-// 脸：发光眼 + 小嘴（twin=true 画左右两张脸，用于分裂尸）
-function zombieFace(x, headY, headR, eyeColor, twin = false) {
-  if (twin) {
-    glowEyes(x - headR * 0.55, headY + headR * 0.08, headR * 0.2, headR * 0.13, eyeColor);
-    glowEyes(x + headR * 0.55, headY + headR * 0.08, headR * 0.2, headR * 0.13, eyeColor);
-  } else {
-    glowEyes(x, headY + headR * 0.08, headR * 0.4, headR * 0.16, eyeColor);
+  // 破布下摆：撕边垂布
+  const hemY = y + h / 2;
+  ctx.fillStyle = shade(color, -0.5);
+  for (let i = 0; i < 4; i++) {
+    const px = x - w / 2 + (w / 4) * i + w / 8;
+    ctx.beginPath();
+    ctx.moveTo(px - w / 9, hemY - 1);
+    ctx.lineTo(px, hemY + h * 0.14);
+    ctx.lineTo(px + w / 9, hemY - 1);
+    ctx.closePath(); ctx.fill();
   }
-  ctx.strokeStyle = 'rgba(15,25,20,0.75)';
-  ctx.lineWidth = Math.max(1.2, headR * 0.09);
-  ctx.beginPath();
-  ctx.arc(x, headY + headR * 0.32, headR * 0.24, Math.PI * 0.15, Math.PI * 0.85);
-  ctx.stroke();
+  // 补丁（带缝线）
+  ctx.fillStyle = shade(color, 0.32);
+  roundRect(x - w * 0.34, y - h * 0.08, w * 0.3, h * 0.24, 2); ctx.fill();
+  ctx.strokeStyle = 'rgba(10,18,14,0.5)'; ctx.lineWidth = 1;
+  roundRect(x - w * 0.34, y - h * 0.08, w * 0.3, h * 0.24, 2); ctx.stroke();
+}
+// 短臂：向外斜垂 + 深色描边 + 手
+function zombieArms(x, y, w, R, skin) {
+  ctx.lineCap = 'round';
+  for (const sx of [-1, 1]) {
+    const ax = x + sx * (w / 2 - R * 0.04), ay = y - R * 0.18;
+    const hx = x + sx * (w / 2 + R * 0.3), hy = y + R * 0.12;
+    ctx.strokeStyle = OUTLINE; ctx.lineWidth = R * 0.16 + 2.4;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.strokeStyle = skin; ctx.lineWidth = R * 0.16;
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(hx, hy); ctx.stroke();
+    ctx.fillStyle = skin;
+    ctx.beginPath(); ctx.arc(hx, hy, R * 0.12, 0, Math.PI * 2); ctx.fill();
+  }
+}
+// 头：果冻体 + 斑驳暗斑（腐烂质感）
+function zombieHead(x, headY, headR, skin) {
+  softBlob(x, headY, headR, skin, 0.95);
+  ctx.fillStyle = 'rgba(25,40,22,0.22)';
+  ctx.beginPath(); ctx.arc(x - headR * 0.42, headY - headR * 0.34, headR * 0.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + headR * 0.46, headY - headR * 0.12, headR * 0.14, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x + headR * 0.12, headY + headR * 0.62, headR * 0.16, 0, Math.PI * 2); ctx.fill();
+}
+// 脸：大椭圆眼（外辉/虹膜/深瞳/高光）+ 张嘴小牙（twin=true 左右两张脸）
+function zombieFace(x, headY, headR, eyeColor, twin = false) {
+  const er = headR * 0.24, ey = headY + headR * 0.08;
+  const drawEye = (ex) => {
+    ctx.globalAlpha = 0.3; ctx.fillStyle = eyeColor;
+    ctx.beginPath(); ctx.arc(ex, ey, er * 1.8, 0, Math.PI * 2); ctx.fill();
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = 'rgba(18,26,22,0.9)';
+    ctx.beginPath(); ctx.ellipse(ex, ey, er * 1.18, er * 1.3, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = eyeColor;
+    ctx.beginPath(); ctx.ellipse(ex, ey, er, er * 1.1, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#0c1512';
+    ctx.beginPath(); ctx.ellipse(ex, ey + er * 0.12, er * 0.45, er * 0.55, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.arc(ex - er * 0.34, ey - er * 0.4, er * 0.28, 0, Math.PI * 2); ctx.fill();
+  };
+  if (twin) { drawEye(x - headR * 0.52); drawEye(x + headR * 0.52); }
+  else { drawEye(x - headR * 0.4); drawEye(x + headR * 0.4); }
+  // 张开的小嘴 + 两颗小牙
+  const my = headY + headR * 0.52;
+  ctx.fillStyle = 'rgba(22,16,18,0.85)';
+  ctx.beginPath(); ctx.ellipse(x, my, headR * 0.28, headR * 0.16, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#ded8c2';
+  ctx.fillRect(x - headR * 0.13, my - headR * 0.13, headR * 0.09, headR * 0.09);
+  ctx.fillRect(x + headR * 0.04, my - headR * 0.13, headR * 0.09, headR * 0.09);
 }
 
 function drawEnemyBody(e, x, y, r) {
@@ -439,35 +486,37 @@ function drawEnemyBody(e, x, y, r) {
   const skin = e.color;
   const cloth = shade(skin, -0.45);
   switch (e.type) {
-    case 'armored': { // 装甲尸车（对齐参考「双头僵尸」）：宽车体 + 装甲横带 + 双头
-      const bw = R * 1.7, bh = R * 1.15, by = y + R * 0.42;
+    case 'armored': { // 装甲尸车（对齐参考「双头僵尸」）：宽车体 + 装甲横带铆钉 + 双头
+      const bw = R * 1.66, bh = R * 1.12, by = y + R * 0.42;
       zombieBody(x, by, bw, bh, skin);
-      zombieArms(x, by, bw * 0.9, R * 0.9, skin);
-      ctx.fillStyle = shade(skin, 0.32);
-      roundRect(x - bw * 0.42, by - bh * 0.18, bw * 0.84, bh * 0.3, 3); ctx.fill();
+      zombieArms(x, by, bw * 0.92, R * 0.95, skin);
+      ctx.fillStyle = shade(skin, 0.3);
+      roundRect(x - bw * 0.4, by - bh * 0.16, bw * 0.8, bh * 0.3, 3); ctx.fill();
       ctx.strokeStyle = OUTLINE; ctx.lineWidth = 1.2;
-      roundRect(x - bw * 0.42, by - bh * 0.18, bw * 0.84, bh * 0.3, 3); ctx.stroke();
+      roundRect(x - bw * 0.4, by - bh * 0.16, bw * 0.8, bh * 0.3, 3); ctx.stroke();
+      ctx.fillStyle = shade(skin, -0.35);
+      for (const sx of [-1, 0, 1]) { ctx.beginPath(); ctx.arc(x + sx * bw * 0.26, by, 2.2, 0, Math.PI * 2); ctx.fill(); }
       for (const sx of [-1, 1]) {
-        const hx = x + sx * R * 0.5, hy = y - R * 0.72, hr = R * 0.44;
-        softBlob(hx, hy, hr, skin, 0.95);
-        glowEyes(hx, hy + hr * 0.08, hr * 0.38, hr * 0.15, '#8ff0ff');
+        const hx = x + sx * R * 0.48, hy = y - R * 0.72, hr = R * 0.42;
+        zombieHead(hx, hy, hr, skin);
+        zombieFace(hx, hy, hr, '#8ff0ff');
       }
       return;
     }
-    case 'ranged': { // 远程尸（对齐参考「篮球僵尸」）：站姿 + 胸前抱发光球
-      const hr = R * 0.56, hy = y - R * 0.6;
-      zombieBody(x, y + R * 0.5, R * 0.8, R * 1.0, cloth);
-      zombieArms(x, y + R * 0.5, R * 0.8, R, skin);
-      softBlob(x, hy, hr, skin, 0.95);
-      ctx.fillStyle = 'rgba(90,209,255,0.3)';
-      ctx.beginPath(); ctx.arc(x + R * 0.52, y + R * 0.36, R * 0.3, 0, Math.PI * 2); ctx.fill();
+    case 'ranged': { // 远程尸（对齐参考「篮球僵尸」）：站姿 + 双手怀里抱发光球
+      const hr = R * 0.62, hy = y - R * 0.58;
+      zombieBody(x, y + R * 0.5, R * 0.74, R * 0.9, cloth);
+      zombieArms(x, y + R * 0.5, R * 0.74, R * 0.95, skin);
+      ctx.fillStyle = 'rgba(90,209,255,0.32)';
+      ctx.beginPath(); ctx.arc(x, y + R * 0.18, R * 0.26, 0, Math.PI * 2); ctx.fill();
       ctx.fillStyle = '#7fe6ff';
-      ctx.beginPath(); ctx.arc(x + R * 0.52, y + R * 0.36, R * 0.17, 0, Math.PI * 2); ctx.fill();
-      zombieFace(x, hy, hr, '#e8ddff');
+      ctx.beginPath(); ctx.arc(x, y + R * 0.18, R * 0.15, 0, Math.PI * 2); ctx.fill();
+      zombieHead(x, hy, hr, skin);
+      zombieFace(x, hy, hr, '#d9ccff');
       return;
     }
     case 'bomber': { // 自爆尸：圆肚 + 胸前炸弹桶（临线脉动核心 = 危险信号）
-      const hr = R * 0.56, hy = y - R * 0.6;
+      const hr = R * 0.6, hy = y - R * 0.58;
       ctx.fillStyle = OUTLINE;
       ctx.beginPath(); ctx.arc(x, y + R * 0.42, R * 0.62 + 1.5, 0, Math.PI * 2); ctx.fill();
       const bg = ctx.createRadialGradient(x - R * 0.2, y + R * 0.26, R * 0.1, x, y + R * 0.42, R * 0.66);
@@ -479,28 +528,29 @@ function drawEnemyBody(e, x, y, r) {
       roundRect(x - R * 0.22, y + R * 0.04, R * 0.44, R * 0.4, R * 0.12); ctx.fill();
       ctx.fillStyle = `rgba(255,232,120,${0.45 + prox * 0.5})`;
       ctx.beginPath(); ctx.arc(x, y + R * 0.24, R * 0.13, 0, Math.PI * 2); ctx.fill();
-      softBlob(x, hy, hr, skin, 0.95);
-      zombieFace(x, hy, hr, '#ffe8a0');
+      zombieHead(x, hy, hr, skin);
+      zombieFace(x, hy, hr, '#ffd27e');
       return;
     }
     case 'flyer': { // 飞行尸：半透明软翼 + 悬浮小身（无腿）
       ctx.fillStyle = 'rgba(143,208,232,0.5)';
-      ctx.beginPath(); ctx.ellipse(x - R * 0.75, y + R * 0.1, R * 0.5, R * 0.24, 0.5, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.ellipse(x + R * 0.75, y + R * 0.1, R * 0.5, R * 0.24, -0.5, 0, Math.PI * 2); ctx.fill();
-      const hr = R * 0.58, hy = y - R * 0.35;
-      zombieBody(x, y + R * 0.42, R * 0.66, R * 0.72, shade(skin, -0.2));
-      softBlob(x, hy, hr, skin, 0.95);
-      zombieFace(x, hy, hr, '#eaffff');
+      ctx.beginPath(); ctx.ellipse(x - R * 0.72, y + R * 0.08, R * 0.46, R * 0.22, 0.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x + R * 0.72, y + R * 0.08, R * 0.46, R * 0.22, -0.5, 0, Math.PI * 2); ctx.fill();
+      const hr = R * 0.6, hy = y - R * 0.38;
+      zombieBody(x, y + R * 0.4, R * 0.62, R * 0.68, shade(skin, -0.2));
+      zombieArms(x, y + R * 0.4, R * 0.62, R * 0.85, skin);
+      zombieHead(x, hy, hr, skin);
+      zombieFace(x, hy, hr, '#cfeeff');
       return;
     }
     case 'splitter': { // 分裂尸：双脸 + 头身中缝（提示会裂）
-      const hr = R * 0.62, hy = y - R * 0.6;
-      zombieBody(x, y + R * 0.5, R * 0.9, R * 1.0, cloth);
-      zombieArms(x, y + R * 0.5, R * 0.9, R, skin);
-      softBlob(x, hy, hr, skin, 0.95);
-      ctx.strokeStyle = 'rgba(35,55,20,0.75)'; ctx.lineWidth = Math.max(1.5, R * 0.07); ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(x, hy - hr); ctx.lineTo(x, y + R * 1.0); ctx.stroke();
-      zombieFace(x, hy, hr, '#d7ff8a', true);
+      const hr = R * 0.66, hy = y - R * 0.58;
+      zombieBody(x, y + R * 0.52, R * 0.84, R * 0.92, cloth);
+      zombieArms(x, y + R * 0.52, R * 0.84, R, skin);
+      zombieHead(x, hy, hr, skin);
+      ctx.strokeStyle = 'rgba(35,55,20,0.7)'; ctx.lineWidth = Math.max(1.5, R * 0.06); ctx.lineCap = 'round';
+      ctx.beginPath(); ctx.moveTo(x, hy - hr); ctx.lineTo(x, y + R * 0.98); ctx.stroke();
+      zombieFace(x, hy, hr, '#cfee8a', true);
       return;
     }
     case 'swarm': { // 蜂群：极小金团（数量即血条，画不出造型）
@@ -513,9 +563,9 @@ function drawEnemyBody(e, x, y, r) {
       return;
     }
     case 'runner': { // 疾行尸（对齐参考「迅捷鬣狗」）：瘦削 + 身后速度线
-      const hr = R * 0.5, hy = y - R * 0.5;
-      zombieBody(x, y + R * 0.42, R * 0.62, R * 0.85, cloth);
-      zombieArms(x, y + R * 0.42, R * 0.62, R * 0.85, skin);
+      const hr = R * 0.55, hy = y - R * 0.5;
+      zombieBody(x, y + R * 0.42, R * 0.6, R * 0.8, cloth);
+      zombieArms(x, y + R * 0.42, R * 0.6, R * 0.85, skin);
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
       for (let i = 0; i < 2; i++) {
         const cy = y - R * (1.0 + i * 0.28);
@@ -523,18 +573,16 @@ function drawEnemyBody(e, x, y, r) {
         ctx.moveTo(x - R * 0.3, cy - 4); ctx.lineTo(x - R * 0.62, cy); ctx.lineTo(x - R * 0.3, cy + 4);
         ctx.stroke();
       }
-      softBlob(x, hy, hr, skin, 0.95);
-      zombieFace(x, hy, hr, '#fff2b0');
+      zombieHead(x, hy, hr, skin);
+      zombieFace(x, hy, hr, '#ffe896');
       return;
     }
-    default: { // 普通僵尸：青绿大头 + 短手 + 破衣下摆
-      const hr = R * 0.6, hy = y - R * 0.6;
-      zombieBody(x, y + R * 0.5, R * 0.86, R * 1.0, cloth);
-      zombieArms(x, y + R * 0.5, R * 0.86, R, skin);
-      ctx.fillStyle = shade(skin, -0.5);
-      roundRect(x - R * 0.43, y + R * 0.82, R * 0.86, R * 0.18, 3); ctx.fill();
-      softBlob(x, hy, hr, skin, 0.95);
-      zombieFace(x, hy, hr, '#97f7e6');
+    default: { // 普通僵尸：青绿大头 + 带手短臂 + 破布衣
+      const hr = R * 0.68, hy = y - R * 0.58;
+      zombieBody(x, y + R * 0.52, R * 0.8, R * 0.92, cloth);
+      zombieArms(x, y + R * 0.52, R * 0.8, R, skin);
+      zombieHead(x, hy, hr, skin);
+      zombieFace(x, hy, hr, '#6fe8d0');
       return;
     }
   }
