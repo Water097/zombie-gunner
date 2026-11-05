@@ -449,10 +449,11 @@ function drawBlast(p, t, id) {
       break;
     }
     case 'pierce-trail': {
-      // 弹头从左到右推进；白色拖影拆成 12 段加色光带，越靠尾部越淡（连续过渡，不出网点）。
-      // 3 个命中点按「弹头到达该 x」的时刻依次触发；命中效果外观保持不变。
+      // 弹头线性匀速贯穿（子弹本该恒速，不用缓动）；白色拖影拆成 12 段加色光带，越靠尾部越淡。
+      // 命中圈：弹头「越过该 x 的瞬间」即触发，随弹头继续前进而扩散并淡出 —— 与物理直觉对齐，
+      // 不再用独立时间轴（旧版按线性排的命中时刻、弹头却用 outCubic，导致圈迟到了近 0.2 个周期才出）。
       const HITS = [-24, 0, 24];
-      const headX = -50 + 100 * ease.outCubic(clamp(u / 0.72));
+      const headX = -50 + 100 * clamp(u / 0.72);      // 线性；u=0.72 到达右界 x=50，之后停住表示出屏
       const TRAIL = 36, SEGS = 12;
       for (let i = 0; i < SEGS; i++) {
         const a0 = i / SEGS, a1 = (i + 1) / SEGS;
@@ -462,12 +463,11 @@ function drawBlast(p, t, id) {
       softShape(p, headX, 0, 2.4, 1.8, C[6], 0.95 * A);
       p.glow(headX, 0, 9, C[6], 0.35 * A);
       for (const hx of HITS) {
-        const hitU = ((hx + 50) / 100) * 0.72;
-        const age = u - hitU;
-        if (age < 0) continue;                       // 还没打到，不出现
-        const kh = clamp(age / 0.26);
-        p.glowRing(hx, 0, 3 + 14 * kh, 2, C[4], 0.4 * A * (1 - kh));
-        p.glow(hx, 0, 12, C[6], 0.3 * A * (1 - kh));
+        const past = headX - hx;                       // 弹头越过该点的像素距离
+        if (past < 0) continue;                        // 还没打到
+        const kh = clamp(past / 14);                   // 越过约 14px 内完成扩散淡出（越快越显得同步）
+        p.glowRing(hx, 0, 3 + 14 * kh, 2, C[4], 0.45 * A * (1 - kh));
+        p.glow(hx, 0, 12, C[6], 0.32 * A * (1 - kh));
       }
       break;
     }
