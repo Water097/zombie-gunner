@@ -17,7 +17,15 @@ import { hex } from '../../vendor/pixelfx/src/core/color.js';
 import { TAU, clamp } from '../../vendor/pixelfx/src/core/index.js';
 
 export const R = (list) => list.map(hex);
-export const GROUND = 26;          // 地面线（俯视角下地平线附近）
+
+// ── 摄像机（按参考图：约 3/4 俯视，不是全俯视，也不是正侧视）────────────
+//   屏幕 y 同时承载「高度」和「纵深」，这是这类竖屏射击游戏的关键：
+//     · 在地面上的东西（火区 / 电环 / 焦土）→ 压扁成椭圆，ry ≈ rx × 0.34
+//     · 垂直于屏幕升起的东西（弹道 / 雷 / 光束 / 车）→ 沿屏幕 y 轴向上，不倾斜
+//     · 立体物件（车 / 炮台）→ 顶面占大部分面积 + 底部露一条前脸/尾板，读作 3/4
+//   所以这里只有一条「地面线」，没有地平线；越靠上 = 越远。
+export const GROUND = 26;          // 地面线：技能落点默认落在这条线上
+export const GROUND_K = 0.34;      // 地面椭圆的压扁比（所有地面元素共用）
 
 // 稳定伪随机：同一帧重放位置一致，不会抖成噪点
 export const rnd = (i, s = 1) => {
@@ -30,7 +38,7 @@ export const rnd = (i, s = 1) => {
  * 按 x 逐列求 y，而不是按角度采样——按角度采样在扁平椭圆的两端会跳像素，画出来是虚线圈。
  */
 export function groundRing(p, cx, cy, rx, c, a = 1, thick = 1) {
-  const ry = Math.max(2, rx * 0.34);
+  const ry = Math.max(2, rx * GROUND_K);
   for (let i = -Math.round(rx); i <= Math.round(rx); i++) {
     const k = i / rx;
     const y = Math.round(ry * Math.sqrt(Math.max(0, 1 - k * k)));
@@ -56,15 +64,27 @@ export function shockRing(p, cx, cy, r, c, a) {
  * ramp 需 7 档；phase 传入时间让它扭动。
  */
 export function trail(p, x, y, len, w, ramp, phase, o = {}) {
-  const sway = o.sway ?? 2.5;
+  const sway = o.sway ?? 0;
   for (let i = 0; i < len; i++) {
     const k = i / len;
-    const ww = Math.max(1, w * (1 - k * 0.85) * (0.85 + 0.15 * Math.sin(phase * 9 + i * 0.6)));
-    const xx = x + Math.sin(phase * 7 + i * 0.45) * sway * k;
-    const col = k < 0.15 ? ramp[6] : k < 0.38 ? ramp[5] : k < 0.65 ? ramp[4] : k < 0.85 ? ramp[2] : ramp[1];
-    p.rect(xx - ww / 2, y + i, ww, 1, col, 1);
+    const taper = 1 - k * 0.92;
+    const flick = 0.8 + 0.2 * Math.sin(phase * 16 + i * 1.1);
+    // 像素级抖动：每行宽度和中心都抖一下，不然一条直柱会被读成几段「胶囊」
+    const jitterW = 0.78 + 0.44 * rnd(i, 3);
+    const jitterX = (rnd(i, 7) - 0.5) * 1.6;
+    const ww = Math.max(1, w * taper * flick * jitterW);
+    const xx = Math.round(x + Math.sin(phase * 6 + i * 0.5) * sway * k + jitterX * (0.3 + k));
+    // 外焰（暗→中）铺一层，再用亮芯盖在中间
+    const outer = k < 0.32 ? ramp[4] : k < 0.62 ? ramp[3] : k < 0.85 ? ramp[2] : ramp[1];
+    p.rect(xx - ww / 2, y + i, ww, 1, outer, 1);
+    if (k < 0.72) {
+      const cw = Math.max(1, ww * 0.5);
+      const core = k < 0.22 ? ramp[6] : k < 0.45 ? ramp[5] : ramp[4];
+      p.rect(xx - cw / 2, y + i, cw, 1, core, 1);
+    }
+    if (rnd(i, 11) > 0.86) p.dot(xx + (rnd(i, 5) > 0.5 ? 1 : -1) * (ww * 0.6 + 1), y + i, ramp[2], 1);
   }
-  p.glowLine(x, y + len * 0.18, x, y + len * 0.75, w * 1.5, ramp[4], 0.22);
+  p.glowLine(x, y + len * 0.15, x, y + len * 0.7, w * 1.3, ramp[4], 0.22);
 }
 
 /**
@@ -129,7 +149,7 @@ export function embers(p, x, y, spread, n, ramp, t, a = 1) {
 
 /** 地面焦痕：一圈压扁的暗色，作为「这里被烧过」的痕迹。 */
 export function scorch(p, cx, r, a = 0.55) {
-  p.ellipse(cx, GROUND, r, r * 0.34, hex('#1a1210'), a);
+  p.ellipse(cx, GROUND, r, r * GROUND_K, hex('#1a1210'), a);
 }
 
 /** 电弧：两点之间的折线，带 1 段分叉。 */
