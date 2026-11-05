@@ -15,7 +15,10 @@ import {
 import { LEARN_CARDS } from './cards.mjs';
 import { has } from '../status/status-system.mjs';
 import { SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters } from './soft-fx.mjs';
+// 敌人精灵层（2026-11-05）：把概念图里的史莱姆直接跑进 demo，替换原几何占位
+import { EnemySprites } from './sprite-layer.mjs';
 
+const TAU = Math.PI * 2;
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 const DPR = Math.min(window.devicePixelRatio || 1, 2); // 12 册硬指标：DPR≤2 控内存
@@ -24,6 +27,8 @@ let world = createWorld();
 // 柔和卡通特效层（2026-11-04）：借 pixelfx 的加色辉光/色阶/相位编排，纯 Canvas2D JS 实现。
 // 只读 world，不写 world；自建实例池由渲染层触发，逻辑层零改动。
 const softFx = new SoftFx({ seed: 20261104, lootTarget: { x: 44, y: 22 } });
+const enemySprites = new EnemySprites();
+let lastDt = 1000 / 60;   // 精灵层用的步长（与固定步长同源）
 let lastT = performance.now();
 let acc = 0;
 const STEP = 1000 / 60; // 固定步长 16.67ms，手感与帧率解耦
@@ -158,6 +163,7 @@ function frame(now) {
   acc += dt;
   // 特效层跟随同一个固定步长推进 → 与帧率解耦、确定性（对齐 pixelfx 的 120Hz 细分思路）
   while (acc >= STEP) { update(world, STEP); softFx.update(STEP); acc -= STEP; }
+  lastDt = dt;
   fpsAccum += dt; fpsFrames++;
   if (fpsAccum >= 500) { fps = Math.round((fpsFrames * 1000) / fpsAccum); fpsAccum = 0; fpsFrames = 0; }
   render();
@@ -252,24 +258,87 @@ function glowEyes(x, y, dx, r, color) {
   }
 }
 
+// 战场底（2026-11-05 按参考图重做）：中间一条砖石通道，两侧石墙，底部要塞门。
+// 静态部分预渲染到离屏 canvas（2x 超采样防糊），每帧只 blit + 画动态的攻势提示线。
+let bgCache = null;
+
+function buildBackground() {
+  const cv = document.createElement('canvas');
+  cv.width = WORLD.W * 2; cv.height = WORLD.H * 2;
+  const g = cv.getContext('2d');
+  g.scale(2, 2);
+
+  const WALL_W = 46;
+  const laneX0 = WALL_W, laneX1 = WORLD.W - WALL_W;
+
+  // 底色
+  g.fillStyle = '#0c1018'; g.fillRect(0, 0, WORLD.W, WORLD.H);
+
+  // ── 通道：暖棕砖石（低对比，别抢技能）──
+  g.fillStyle = '#241d15'; g.fillRect(laneX0, 0, laneX1 - laneX0, WORLD.H);
+  const BW = 23, BH = 12;
+  for (let row = 0, y = -BH; y < WORLD.H + BH; row++, y += BH) {
+    const off = row % 2 ? BW / 2 : 0;
+    for (let x = laneX0 - BW; x < laneX1 + BW; x += BW) {
+      const bx = x + off, by = y;
+      // 砖块色差（确定性 hash，不引入随机）
+      const h = Math.abs(Math.sin((bx * 12.9898 + by * 78.233))) % 1;
+      const v = 0.9 + h * 0.22;
+      g.fillStyle = `rgb(${Math.round(54 * v)},${Math.round(43 * v)},${Math.round(31 * v)})`;
+      g.fillRect(bx + 0.5, by + 0.5, BW - 1, BH - 1);
+      // 上沿一点受光
+      g.fillStyle = 'rgba(255,220,170,0.045)';
+      g.fillRect(bx + 0.5, by + 0.5, BW - 1, 1);
+      // 下沿阴影
+      g.fillStyle = 'rgba(0,0,0,0.32)';
+      g.fillRect(bx + 0.5, by + BH - 2, BW - 1, 1.5);
+    }
+  }
+  // 通道中央通气：远处更暗（纵深）
+  const depth = g.createLinearGradient(0, 0, 0, WORLD.H);
+  depth.addColorStop(0, 'rgba(4,7,12,0.72)');
+  depth.addColorStop(0.5, 'rgba(4,7,12,0.22)');
+  depth.addColorStop(1, 'rgba(0,0,0,0.45)');
+  g.fillStyle = depth; g.fillRect(laneX0, 0, laneX1 - laneX0, WORLD.H);
+
+  // ── 两侧石墙 ──
+  for (const side of [0, 1]) {
+    const x0 = side ? laneX1 : 0;
+    g.fillStyle = '#191d26'; g.fillRect(x0, 0, WALL_W, WORLD.H);
+    // 石块纹理
+    for (let y = 0; y < WORLD.H; y += 30) {
+      for (let i = 0; i < 2; i++) {
+        const bw = WALL_W / 2 - 2;
+        const bx = x0 + 2 + i * (WALL_W / 2);
+        const v = 0.85 + (Math.abs(Math.sin(y * 0.7 + i * 3.1)) % 1) * 0.3;
+        g.fillStyle = `rgb(${Math.round(30 * v)},${Math.round(35 * v)},${Math.round(45 * v)})`;
+        g.fillRect(bx, y + 2, bw, 26);
+      }
+    }
+    // 靠近通道的内沿亮线（受光）
+    g.fillStyle = 'rgba(140,170,200,0.10)';
+    g.fillRect(side ? laneX1 - 2 : laneX0, 0, 2, WORLD.H);
+    // 外沿压暗
+    g.fillStyle = 'rgba(0,0,0,0.45)';
+    g.fillRect(side ? WORLD.W - 10 : 0, 0, 10, WORLD.H);
+  }
+
+  // 顶部渐隐（远处雾）
+  const top = g.createLinearGradient(0, 0, 0, 150);
+  top.addColorStop(0, 'rgba(5,8,14,0.85)');
+  top.addColorStop(1, 'rgba(5,8,14,0)');
+  g.fillStyle = top; g.fillRect(0, 0, WORLD.W, 150);
+
+  return cv;
+}
+
 function drawBackground() {
-  const g = ctx.createLinearGradient(0, 0, 0, WORLD.H);
-  g.addColorStop(0, '#17262b');
-  g.addColorStop(0.55, '#121f24');
-  g.addColorStop(1, '#0d171b');
-  ctx.fillStyle = g; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
-  // 暖棕砖格（工业地面氛围，低对比）
-  ctx.strokeStyle = 'rgba(122,86,56,0.10)'; ctx.lineWidth = 1;
-  for (let x = 45; x < WORLD.W; x += 45) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, WORLD.H); ctx.stroke(); }
-  for (let y = 0; y < WORLD.H; y += 45) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(WORLD.W, y); ctx.stroke(); }
-  // 中线柔光晕，制造纵深
-  const vg = ctx.createRadialGradient(WORLD.W / 2, WORLD.H * 0.34, 60, WORLD.W / 2, WORLD.H * 0.34, WORLD.H * 0.82);
-  vg.addColorStop(0, 'rgba(90,150,150,0.07)');
-  vg.addColorStop(1, 'rgba(0,0,0,0)');
-  ctx.fillStyle = vg; ctx.fillRect(0, 0, WORLD.W, WORLD.H);
-  // 防线：柔和红色虚线（敌人推进到此线停住）
-  ctx.strokeStyle = 'rgba(255,120,120,0.22)'; ctx.setLineDash([7, 9]); ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(0, FORTRESS.attackLine); ctx.lineTo(WORLD.W, FORTRESS.attackLine); ctx.stroke();
+  if (!bgCache) bgCache = buildBackground();
+  ctx.drawImage(bgCache, 0, 0, WORLD.W, WORLD.H);
+
+  // 动态：敌人推进到此线停住的警戒线（柔和红虚线）
+  ctx.strokeStyle = 'rgba(255,120,120,0.20)'; ctx.setLineDash([7, 9]); ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(46, FORTRESS.attackLine); ctx.lineTo(WORLD.W - 46, FORTRESS.attackLine); ctx.stroke();
   ctx.setLineDash([]);
 }
 
@@ -612,8 +681,8 @@ function drawEnemies() {
       ctx.strokeStyle = 'rgba(255,107,107,0.75)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(x, y, R + 4, 0, Math.PI * 2); ctx.stroke();
     }
-    drawEnemyBody(e, x, y, r);
-    if (e.hitFlash > 0) { ctx.fillStyle = 'rgba(255,255,255,0.42)'; ctx.beginPath(); ctx.arc(x, y, R * 0.9, 0, Math.PI * 2); ctx.fill(); }
+    // 史莱姆精灵（概念图直接跑）；渲染失败才退回几何占位
+    if (!enemySprites.draw(ctx, e, lastDt / 1000)) drawEnemyBody(e, x, y, r);
     const stCol = has(e.st, 'freeze') ? '#5ad1ff' : has(e.st, 'stun') ? '#c77dff' : has(e.st, 'burn') ? '#ff7a3c' : null;
     if (stCol) {
       ctx.globalAlpha = 0.22; ctx.fillStyle = stCol;
@@ -630,6 +699,7 @@ function drawEnemies() {
     roundRect(x - bw / 2, by, Math.max(0, bw * (e.hp / e.maxHp)), 4, 2); ctx.fill();
     drawStatusIcons(e, x - r, by - 10);
   }
+  enemySprites.reap(world.enemies);
 }
 
 const STATUS_ICON = [
@@ -702,15 +772,44 @@ function drawTurrets() {
   }
 }
 function drawFlames() {
+  // 燃烧地带（2026-11-05 对齐概念图）：焦土 → 三层火床 → 火舌 → 热辉
+  // 之前只有一个半透明圆，读不出「地面在烧」。
   for (const f of world.flames) {
     const a = Math.max(0, f.life / f.maxLife);
-    ctx.globalAlpha = 0.18 * a + 0.05; ctx.fillStyle = f.color;
-    ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.5 * a; ctx.strokeStyle = '#ff9a3c'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(f.x, f.y, f.r * (0.9 + Math.sin(f.life / 120) * 0.06), 0, Math.PI * 2); ctx.stroke();
+    const R = f.r;
+    // 焦土
+    ctx.globalAlpha = 0.45 * a + 0.15;
+    ctx.fillStyle = '#150d09';
+    ctx.beginPath(); ctx.ellipse(f.x, f.y, R * 1.06, R * 0.34, 0, 0, TAU); ctx.fill();
+    // 火床三层（越内越亮）
+    const bed = [[0.94, 0.31, `rgba(111,29,13,${0.95 * a})`],
+                 [0.72, 0.24, `rgba(168,48,19,${0.9 * a})`],
+                 [0.46, 0.16, `rgba(221,82,24,${0.85 * a})`]];
+    for (const [rx, ry, col] of bed) {
+      ctx.globalAlpha = 1; ctx.fillStyle = col;
+      ctx.beginPath(); ctx.ellipse(f.x, f.y, R * rx, R * ry, 0, 0, TAU); ctx.fill();
+    }
+    // 火舌：沿椭圆 9 根，随 life 抖动
+    const ph = f.life / 90;
+    for (let i = 0; i < 9; i++) {
+      const ang = (i / 9) * TAU + 0.4;
+      const rr = R * (0.45 + 0.42 * ((i % 3) / 2));
+      const x = f.x + Math.cos(ang) * rr;
+      const y = f.y + Math.sin(ang) * rr * 0.34;
+      const h = (7 + 6 * ((i * 7) % 5) / 4) * a * (0.8 + 0.2 * Math.sin(ph + i));
+      ctx.globalAlpha = 0.95 * a;
+      ctx.fillStyle = '#a83013';
+      ctx.beginPath(); ctx.moveTo(x - 3, y); ctx.lineTo(x, y - h); ctx.lineTo(x + 3, y); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#ff8a34';
+      ctx.beginPath(); ctx.moveTo(x - 1.6, y); ctx.lineTo(x + 0.2, y - h * 0.7); ctx.lineTo(x + 1.6, y); ctx.closePath(); ctx.fill();
+    }
+    // 热辉
     ctx.globalAlpha = 1;
+    ctx.fillStyle = `rgba(255,120,60,${0.10 * a})`;
+    ctx.beginPath(); ctx.ellipse(f.x, f.y, R * 1.3, R * 0.5, 0, 0, TAU); ctx.fill();
   }
 }
+
 function drawSaws() {
   for (const s of world.saws) {
     ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.spin / 80);
