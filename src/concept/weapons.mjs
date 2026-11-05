@@ -269,8 +269,8 @@ function drawBullet(p, t, c) {
       bulletAt(p, C, x, 0, 3, A);
       break;
     case 'double':
-      // 一前一后纵列：第二颗在后 9px、略暗，两颗同向、命中同一落点
-      bulletAt(p, C, x - 9, 0, 2.6, A * 0.82);
+      // 一前一后纵列：第二颗在后 20px、略暗，两颗同向、命中同一落点
+      bulletAt(p, C, x - 20, 0, 2.6, A * 0.82);
       bulletAt(p, C, x, 0, 2.6, A);
       break;
     case 'scatter':
@@ -393,10 +393,20 @@ function drawAttr(p, t, c) {
       break;
     }
     case 'childblast': {
-      // 与主子弹共用的爆炸，只是半径小很多；3 颗子子弹各自触发一次
-      for (let i = 0; i < 3; i++) {
-        const an = i * TAU / 3 + 0.5, d = 8 + 22 * k;
-        blastBurst(p, C, 36 + Math.cos(an) * d, Math.sin(an) * d, 7, A, k);
+      // 与主子弹同构：先飞向目标、命中之后才爆炸（不在飞行中途炸）。
+      // 主弹命中(0.32) → 子子弹飞向各自目标(0.32~0.62) → 命中后爆炸(0.62~1)。
+      // 爆炸仍调主弹同一个 blastBurst()，只是半径缩到 7（伤害/范围小，但都是子弹）。
+      const TARGETS = [{ x: 4, y: -20 }, { x: 4, y: 20 }, { x: 50, y: -4 }];
+      for (const T of TARGETS) softShape(p, T.x, T.y, 3.5, 5, C[2], 0.42, 4);   // 各自的命中物体
+      if (u < 0.62) {
+        const e = ease.outCubic(clamp((u - 0.32) / 0.30));
+        for (const T of TARGETS) {
+          const an = Math.atan2(T.y, T.x - 36);
+          bulletAt(p, C, 36 + (T.x - 36) * e, T.y * e, 1.8, A, an);
+        }
+      } else {
+        const kb = clamp((u - 0.62) / 0.38);
+        for (const T of TARGETS) blastBurst(p, C, T.x, T.y, 7, A, kb);
       }
       break;
     }
@@ -438,14 +448,29 @@ function drawBlast(p, t, id) {
       }
       break;
     }
-    case 'pierce-trail':
-      p.glowLine(-50, 0, 50, 0, 6, C[5], 0.45 * A);
-      p.line(-50, 0, 50, 0, C[6], 1);
-      for (const hx of [-16, 18]) {
-        p.glowRing(hx, 0, 3 + 14 * k, 2, C[4], 0.4 * A);
-        p.glow(hx, 0, 12, C[6], 0.3 * A);
+    case 'pierce-trail': {
+      // 弹头从左到右推进；白色拖影拆成 12 段加色光带，越靠尾部越淡（连续过渡，不出网点）。
+      // 3 个命中点按「弹头到达该 x」的时刻依次触发；命中效果外观保持不变。
+      const HITS = [-24, 0, 24];
+      const headX = -50 + 100 * ease.outCubic(clamp(u / 0.72));
+      const TRAIL = 36, SEGS = 12;
+      for (let i = 0; i < SEGS; i++) {
+        const a0 = i / SEGS, a1 = (i + 1) / SEGS;
+        p.glowLine(headX - TRAIL * (1 - a0), 0, headX - TRAIL * (1 - a1), 0,
+          3.2, C[6], 0.55 * A * Math.pow(a1, 1.6));
+      }
+      softShape(p, headX, 0, 2.4, 1.8, C[6], 0.95 * A);
+      p.glow(headX, 0, 9, C[6], 0.35 * A);
+      for (const hx of HITS) {
+        const hitU = ((hx + 50) / 100) * 0.72;
+        const age = u - hitU;
+        if (age < 0) continue;                       // 还没打到，不出现
+        const kh = clamp(age / 0.26);
+        p.glowRing(hx, 0, 3 + 14 * kh, 2, C[4], 0.4 * A * (1 - kh));
+        p.glow(hx, 0, 12, C[6], 0.3 * A * (1 - kh));
       }
       break;
+    }
   }
 }
 
