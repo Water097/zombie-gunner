@@ -26,7 +26,7 @@
 import { WHITE, frameMeta, makeFx } from './pixel-lib.mjs';
 import { hex } from '../../vendor/pixelfx/src/core/color.js';
 import { wrap, TAU, clamp, ease } from '../../vendor/pixelfx/src/core/index.js';
-import { R, GROUND, rnd, groundRing, shockRing, trail, blast, smoke, embers, scorch, arc } from './skill-lib.mjs';
+import { R, GROUND, GROUND_K, rnd, groundRing, shockRing, trail, blast, smoke, embers, scorch, arc } from './skill-lib.mjs';
 
 const W = 112, H = 88;
 
@@ -76,7 +76,7 @@ function drawThermo(p, t) {
 
   // 接触即爆：一段，不延迟（06 册「燃料空气弹」是加成卡 ⑥，不加强时就是单段）
   const k1 = (u - T0) / 0.50;
-  if (k1 < 1) blast(p, 0, -12, 30, k1, C, { debris: 12 });
+  if (k1 < 1) blast(p, 0, -12, 24, k1, C, { debris: 12 });
 
   // 残留：火圈 + 余烟 + 余烬
   const after = seg(u, T0 + 0.35, D);
@@ -176,71 +176,71 @@ function drawDryice(p, t) {
 // 3 · 电磁天雷：积云 → 折线雷劈下 → 电环 + 爬电
 // ─────────────────────────────────────────────────────────────
 function drawThunder(p, t) {
-  // 定位是「精准打击单个目标」：全程只有 1.15s，一道雷钉在一个点上，不做大范围地环
-  const D = 1.15;
-  const T_HIT = 0.26, T_FADE = 0.55;
+  // 定位：精准打击单个目标，极快。形态 = 雷劈到**地面** → 沿地面向外扩散（升级树 ⑤ 感电范围）。
+  // 注意：扩散是**贴地的压扁椭圆**，不是悬在空中的正圆——正圆会被读成「有个圈在转」。
+  const D = 0.64;
+  const T_HIT = 0.16;        // 雷落地
+  const T_SPREAD = 0.36;     // 扩散结束
   const u = wrap(t, D);
   const C = EL.volt;
-  const HX = 0, HY = 2;                       // 精确命中点
+  const HX = 0, GY = GROUND - 4;      // 落点在地面线上
 
-  // 云：来得快、散得快，而且只占顶部一条
-  const cloudK = seg(u, 0, 0.16) * (1 - seg(u, T_FADE, D));
+  // 云：只在顶上闪一下，0.45s 内散尽
+  const cloudK = seg(u, 0, 0.09) * (1 - seg(u, 0.30, 0.54));
   if (cloudK > 0.02) {
-    const puffs = [[-16, -32, 9], [-4, -35, 11], [9, -33, 10], [20, -30, 7]];
-    for (const [cx, cy, r] of puffs) {
-      p.disc(cx, cy, r * (0.6 + 0.4 * cloudK), hex('#1e1734'), 0.92 * cloudK);
-    }
-    p.ellipse(2, -28, 24, 5, hex('#1e1734'), 0.92 * cloudK);
-    p.glow(0, -30, 22, C[4], 0.10 + 0.35 * cloudK);
+    const puffs = [[-15, -32, 9], [-4, -35, 11], [9, -33, 10], [19, -31, 7]];
+    for (const [cx, cy, r] of puffs) p.disc(cx, cy, r * (0.55 + 0.45 * cloudK), hex('#1e1734'), 0.92 * cloudK);
+    p.ellipse(2, -28, 23, 5, hex('#1e1734'), 0.92 * cloudK);
+    p.glow(0, -30, 20, C[4], 0.12 + 0.32 * cloudK);
   }
 
-  // 落雷：极短、极亮，一次一条主干 + 两条短分叉
-  if (u >= T_HIT * 0.75 && u < T_FADE + 0.1) {
+  // 落雷：一条主干 + 两条短分叉，劈到地面
+  if (u >= T_HIT * 0.7 && u < T_HIT + 0.16) {
     const f = Math.floor(u * 90);
-    const a2 = 1 - seg(u, T_HIT + 0.10, T_FADE + 0.1);
-    p.line(1, -26, HX, HY, C[6], a2);
-    arc(p, 1, -26, HX, HY, C[5], f, 2);
-    arc(p, 1, -26, HX, HY, WHITE, f + 9, 1);
-    arc(p, HX - 1, HY - 12, HX - 8, HY - 2, C[4], f + 3, 2);
-    arc(p, HX + 1, HY - 8, HX + 7, HY + 1, C[4], f + 5, 2);
-    p.glowLine(1, -26, HX, HY, 7, C[4], 0.5 * a2);
+    const a2 = 1 - seg(u, T_HIT + 0.06, T_HIT + 0.16);
+    p.line(1, -26, HX, GY, C[6], a2);
+    arc(p, 1, -26, HX, GY, C[5], f, 2);
+    arc(p, 1, -26, HX, GY, WHITE, f + 9, 1);
+    arc(p, HX - 1, GY - 16, HX - 8, GY - 4, C[4], f + 3, 2);
+    arc(p, HX + 1, GY - 12, HX + 7, GY - 2, C[4], f + 5, 2);
+    p.glowLine(1, -26, HX, GY, 7, C[4], 0.5 * a2);
   }
 
-  // 命中点：小核 + 放射电刺 + 紧环（不是一个大白球）
-  if (u > T_HIT) {
-    const k = seg(u, T_HIT, T_HIT + 0.26);
-    const peak = Math.sin(Math.min(1, k) * Math.PI);
-    // 白核：只在前 60% 存在，且很小
-    if (k < 0.62) {
-      const cr = 3 + 3 * (1 - k / 0.62);
-      p.ellipse(HX, HY, cr, cr, WHITE, 1);
+  // 落地：小核 + 沿地面扩散的电环（压扁椭圆，快速推出去后消失）
+  if (u >= T_HIT) {
+    const k = seg(u, T_HIT, T_SPREAD);
+    // 命中点白核：快速收缩消失
+    if (k < 0.5) {
+      const cr = 4 * (1 - k / 0.5) + 1;
+      p.ellipse(HX, GY, cr * 1.2, cr * 0.7, WHITE, 1);
     }
-    p.glow(HX, HY, 22, C[4], 0.5 * (1 - k * 0.8));
-    // 放射电刺：6 条短折线，随峰值伸缩
-    for (let i = 0; i < 6; i++) {
-      const ang = (i / 6) * TAU + 0.3 + Math.floor(u * 40) * 0.7;
-      const r0 = 4, r1 = 5 + 11 * peak;
-      arc(p, HX + Math.cos(ang) * r0, HY + Math.sin(ang) * r0,
-        HX + Math.cos(ang) * r1, HY + Math.sin(ang) * r1, C[5], i + Math.floor(u * 40), 1.2);
-    }
-    // 紧环 r 只到 13，强调这是「点」
-    if (k < 1) {
-      const rr = 4 + 9 * ease.outQuad(k);
-      for (let i = -Math.round(rr); i <= Math.round(rr); i++) {
-        const yy = Math.round(Math.sqrt(Math.max(0, rr * rr - i * i)));
-        p.dot(HX + i, HY - yy, C[6], 1);
-        p.dot(HX + i, HY + yy, C[6], 1);
+    p.glow(HX, GY, 24 * (1 - k * 0.6), C[4], 0.45 * (1 - k));
+
+    // 扩散：贴地椭圆环，推出去后**必须消失**（k 到 0.85 就彻底停止绘制）
+    if (k < 0.85) {
+      const rx = 4 + 26 * ease.outQuad(k);
+      const col = k < 0.35 ? C[6] : k < 0.6 ? C[5] : C[3];
+      groundRing(p, HX, GY, rx, col, 1, k < 0.35 ? 2 : 1);
+      // 地面上向外爬的电弧：只在前 60% 存在
+      if (k < 0.6) {
+        for (let i = 0; i < 5; i++) {
+          const ang = (i / 5) * TAU + 0.6;
+          const r0 = rx * 0.55, r1 = rx * 0.98;
+          const f2 = Math.floor(u * 55) + i * 13;
+          arc(p,
+            HX + Math.cos(ang) * r0, GY + Math.sin(ang) * r0 * GROUND_K,
+            HX + Math.cos(ang) * r1, GY + Math.sin(ang) * r1 * GROUND_K,
+            C[5], f2, 1.5);
+        }
       }
     }
-    // 残电：3 条短弧快速消失
-    const ra = 1 - seg(u, T_HIT + 0.10, T_HIT + 0.45);
-    if (ra > 0) {
+    // 余电：落点附近 3 个闪点，0.5s 内熄灭
+    const rk = seg(u, T_SPREAD, T_SPREAD + 0.25);
+    if (rk < 1) {
       for (let i = 0; i < 3; i++) {
-        const f2 = Math.floor(u * 45) + i * 19;
-        const a0 = rnd(f2) * TAU, r0 = 5 + rnd(f2, 2) * 4, r1 = 8 + rnd(f2, 3) * 7;
-        if (rnd(f2, 4) > ra) continue;
-        arc(p, HX + Math.cos(a0) * r0, HY + Math.sin(a0) * r0,
-          HX + Math.cos(a0) * r1, HY + Math.sin(a0) * r1, C[5], f2, 1.2);
+        const f3 = Math.floor(u * 60) + i * 23;
+        if (rnd(f3, 6) < rk) continue;
+        p.dot(Math.round(HX + (rnd(f3, 2) - 0.5) * 16), Math.round(GY + (rnd(f3, 3) - 0.5) * 8), C[5], 1);
       }
     }
   }
@@ -512,7 +512,7 @@ function drawFlamezone(p, t) {
   const D = 4.0;
   const u = wrap(t, D);
   const C = EL.ember;
-  const RMAX = 30;
+  const RMAX = 26;
 
   const grow = ease.outQuad(seg(u, 0.10, 1.45));     // 扩散
   const fade = ease.inQuad(seg(u, 2.85, 3.80));      // 熄灭
@@ -658,6 +658,20 @@ const SKILLS = [
   { id: 'saw', name: '旋转刀轮', el: '物理系 · 实体（横向）', mech: '巨型锯片横滚 + 火花 + 撞边折返',
     read: '唯一横向作用的技能：画面上是「横着扫过去」', draw: (p, t) => drawSaw(p, t), D: 3.0 },
 ];
+
+// 同屏测试要复用同一批绘制函数（不再写第二套），所以这里显式导出
+export const SKILL_DRAW = {
+  thermo: (p, t) => drawThermo(p, t),
+  dryice: (p, t) => drawDryice(p, t),
+  thunder: (p, t) => drawThunder(p, t),
+  vehicle: (p, t) => drawVehicle(p, t, false),
+  vehicleHeavy: (p, t) => drawVehicle(p, t, true),
+  beam: (p, t) => drawBeam(p, t),
+  laser: (p, t) => drawLaser(p, t),
+  turret: (p, t) => drawTurret(p, t),
+  flamezone: (p, t) => drawFlamezone(p, t),
+  saw: (p, t) => drawSaw(p, t),
+};
 
 export const SKILL_EFFECTS = SKILLS.map((c) => ({
   id: c.id, name: c.name, spec: c.el, mech: c.mech,

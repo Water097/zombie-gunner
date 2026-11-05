@@ -165,3 +165,33 @@ export function arc(p, x0, y0, x1, y1, c, seed = 0, amp = 4) {
     px = nx; py = ny;
   }
 }
+
+
+// ─────────────────────────────────────────────────────────────
+// 同屏叠加用：给画笔加一个平移偏移
+// 技能都写在自己的坐标系里（以画面中心为原点），同屏时要能挪到左/右车道，
+// 所以这里包一层 proxy，只改坐标参数，不动任何绘制逻辑。
+// ─────────────────────────────────────────────────────────────
+export function withOffset(p, dx, dy) {
+  const P2 = (x, y) => [x + dx, y + dy];
+  return new Proxy(p, {
+    get(target, key) {
+      const v = target[key];
+      if (typeof v !== 'function') return v;
+      switch (key) {
+        case 'dot': case 'glow':
+          return (x, y, ...r) => v.call(target, x + dx, y + dy, ...r);
+        case 'rect':
+          return (x, y, w, h, ...r) => v.call(target, x + dx, y + dy, w, h, ...r);
+        case 'ellipse': case 'circle': case 'disc': case 'glowRing':
+          return (x, y, ...r) => v.call(target, x + dx, y + dy, ...r);
+        case 'line': case 'glowLine': case 'beam':
+          return (x0, y0, x1, y1, ...r) => v.call(target, x0 + dx, y0 + dy, x1 + dx, y1 + dy, ...r);
+        case 'poly': case 'polyline':
+          return (pts, ...r) => v.call(target, pts.map(([x, y]) => P2(x, y)), ...r);
+        default:
+          return v.bind(target);
+      }
+    },
+  });
+}
