@@ -78,7 +78,7 @@ export const CATALOG = [
   { id: 'weapon-bullets', title: '武器类别 · 子弹与弹道', sub: '06 册 3.2：双发（一前一后纵列）/ 散射 / 穿透 + 基础弹种。追踪、弹射已按用户拍板移除（弹射连 06 册一并作废）。消耗模型：弹夹 = 扳机 tick，加弹道只改形态、不改换弹节奏。', items: BULLET_EFFECTS },
   { id: 'weapon-attrs', title: '武器类别 · 子弹属性', sub: '06 册 3.2.1 的 5 张视觉卡：火属性弹头 / 爆炸弹头 / 爆炸范围+100% / 命中分裂 / 子子弹爆炸。「子子弹伤害 20%」「+30%」是纯数值卡，不改子弹外观，已从概念图删除。主弹与子子弹共用同一爆炸表现，只差半径。', items: BULLET_ATTR_EFFECTS },
   { id: 'weapon-blasts', title: '武器类别 · 爆炸与命中', sub: '武器侧：枪口火花（按原库 hit-spark 火花语言）、精确步枪穿透余痕、榴弹炮落点爆炸（直接复用原库 small-explosion，时间轴 ×3 压到 1.8s）；末 2 张是原库对照。', items: WEAPON_BLAST_EFFECTS },
-  { id: 'gear', title: '装备类别', sub: '07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）。武器独立成系统，不占装备格；同部位只能穿 1 件。', items: GEAR_EFFECTS },
+  { id: 'gear', title: '装备类别', sub: '07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）。第四版按「装备图标规范 v1」重画：统一左上光源 + 三档明暗 + 1px INK 描边 + 钢/皮革/宝石三材质共用色阶；每部位一个主色相（蓝/钢蓝/皮革棕/翠绿/奥术紫/圣金）+ ①–⑥ 编号角标。首图「装备部位总览」是人形居中、两侧编号槽位带引线定位。武器独立成系统不占格，同部位只能穿 1 件。', items: GEAR_EFFECTS },
   { id: 'skills', title: '技能类别', sub: '02 册 9 个技能。球体颜色读系别，中心符号读形态——避免 9 个发光球长一个样。局内 4 槽上限，一局只选 4 条线。', items: SKILL_EFFECTS },
   { id: 'currency', title: '货币与掉落', sub: '你没点名但概念图必须有的类别。3 种晶体是同一个原库特效换 palette 得到的，正好演示「重着色不改代码」。', items: CURRENCY },
   { id: 'actors', title: '角色 / 宠物 / 要塞', sub: '你没点名但绕不开的实体。库里只有特效、没有立绘，这三个是 Painter 从零写的像素帧动画。', items: ACTOR_EFFECTS },

@@ -1,194 +1,350 @@
-// 装备类别 · 07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）
+// 装备类别 · 07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）+ 部位总览图
 //
-// 第二版（2026-11-05）：原版用 p.rect/p.poly/p.circle 的硬像素块拼接，既像素化又难辨认。
-// 改法与武器侧一致——softShape 真半透明逐点填充（无 Bayer 网点）做平滑形体 +
-// 三层明暗 + 加色 rim 光 + 柔和投影，把每个部位重画成一眼可辨的剪影。
+// ── 第四版（2026-11-05 重做）─────────────────────────────────
+// 第三版的病根不是配色，是几何函数：
+//   const disc = (g, cx, cy, r, c) => g.ellipse(cx, cy, r, r, c);
+// 但所有调用点都按 6 个参数传（cx, cy, rx, ry, color）→ color 被当成半径吃掉，
+// 真正填进网格的是 9 / 17 这种色值，几乎全透明。结果 6 张图全是「空心轮廓」，
+// 总览图的人形连头都没有（head 用 disc 画）。这就是「丑」的真实原因。
+//
+// 本版同时立一份装备图标规范（后续同类必须遵守）：
+//   1. 几何：只用 矩形 / 椭圆 / 多边形 / 线 四种形，helper 全部显式签名，禁止色值当参数
+//   2. 光向：统一左上打光——左/上用亮档，右/下用暗档，不出现第二光源
+//   3. 明暗：每个材质固定 3 档（亮 / 中 / 暗），不用渐变插值
+//   4. 描边：统一 1px INK 硬边（Grid.outline），不做半透明羽化
+//   5. 材质：钢（次级结构：扣具/鞋底/领口/铆钉）/ 皮革 / 宝石 三种跨部位共用色阶
+//   6. 识别：每部位一个主色相（蓝/钢蓝/皮革棕/翠绿/奥术紫/圣金）+ ①–⑥ 编号角标，
+//      角标统一「深底 + 部位色环 + 白字」，不再出现 6 个白球
+//   7. 尺度：主体控制在 60×60 以内、四周留白 ≥ 10px，缩略图下也读得清
+//
 // 武器模块在 weapons.mjs，本文件只属于「装备」。
 
-import { INK, WHITE, TAU, wrap, clamp, RAMPS, frameMeta, makeFx } from './pixel-lib.mjs';
+import { wrap, TAU } from '../../vendor/pixelfx/src/core/index.js';
+import { hex } from '../../vendor/pixelfx/src/core/color.js';
+import { Grid } from '../../vendor/pixelfx/src/fx/critters/_lib.js';
+import { frameMeta, makeFx, INK, WHITE } from './pixel-lib.mjs';
 
-const W = 112, H = 80;
+const W = 112, H = 88;
 
-// ── 柔化画刷（与 weapons.mjs 同源：真半透明 blend，不产生网点噪点） ──
-function softShape(p, cx, cy, rx, ry, c, a, n = 2) {
-  if (a <= 0 || rx <= 0 || ry <= 0) return;
-  const X = Math.ceil(rx), Y = Math.ceil(ry);
-  for (let y = -Y; y <= Y; y++)
-    for (let x = -X; x <= X; x++) {
-      const d = Math.pow(Math.abs(x) / rx, n) + Math.pow(Math.abs(y) / ry, n);
-      if (d > 1) continue;
-      p.blend(cx + x, cy + y, c, a * clamp(1 - 0.12 * d));
-    }
-}
+// ── 材质色阶（显式 7 档，不经过 palettes/fit 重采样，避免命名与实际色值错位）──
+const R = (list) => list.map(hex);
+const MAT = {
+  steel:   R(['#0e1318', '#1a222b', '#2b3644', '#41505f', '#5d6e80', '#8b9aa8', '#c6cfd9']),
+  ice:     R(['#0d1b33', '#16305c', '#24509a', '#3b7fd6', '#6fb4f0', '#b3ddff', '#eaf7ff']),
+  steelB:  R(['#0f1620', '#1a2536', '#2a3a52', '#3f5474', '#5c77a0', '#8ea9cd', '#d8e6f5']),
+  leather: R(['#1d1208', '#3a2412', '#5e3a1c', '#8a5a2a', '#b8843f', '#dfb072', '#f6ddb0']),
+  swift:   R(['#08170c', '#10300f', '#1b5216', '#2f8a20', '#57c22c', '#a3e870', '#e2ffc4']),
+  arcane:  R(['#1a0d2e', '#331a58', '#562a92', '#7f42c8', '#a86ee8', '#d3a8ff', '#f1e0ff']),
+  holy:    R(['#2b1a08', '#563a12', '#8f6520', '#c99a35', '#f0cf7a', '#fff0c0', '#fffdf2']),
+  volt:    R(['#241a05', '#4d3408', '#8c5c0d', '#d6a01a', '#f2c94c', '#ffe89a', '#fffbe0']),
+};
 
-/** 实心环形（戒指 / 环带用），逐点 blend，无网点。 */
-function fillRing(p, cx, cy, ro, ri, c, a) {
-  const X = Math.ceil(ro);
-  for (let y = -X; y <= X; y++)
-    for (let x = -X; x <= X; x++) {
-      const d = Math.hypot(x, y);
-      if (d > ro || d < ri) continue;
-      p.blend(cx + x, cy + y, c, a);
-    }
-}
-
-/**
- * 三层明暗体：暗底 → 受光面 → 左上高光，叠加出平滑的金属/宝石质感（无网点）。
- * ox/oy 是光源偏移，负数 = 左上方打光。
- */
-function shadeBody(p, cx, cy, rx, ry, R, o = {}) {
-  const n = o.n ?? 2, a = o.a ?? 1, ox = o.ox ?? -1.5, oy = o.oy ?? -1.8;
-  softShape(p, cx, cy, rx, ry, R[2], a, n);
-  softShape(p, cx + ox, cy + oy, rx * 0.82, ry * 0.8, R[4], a * 0.9, n);
-  softShape(p, cx + ox * 1.6, cy + oy * 1.6, rx * 0.5, ry * 0.5, R[6], a * 0.85, n);
-}
-
-/** 五芒星（称号铭牌用）：实暗衬底 + 亮填充，在压暗的旗面上保证高对比、不冲白。 */
-function star(p, cx, cy, R, r, cOut, cIn) {
-  const back = [];
-  for (let i = 0; i < 10; i++) {
-    const ang = -Math.PI / 2 + i * Math.PI / 5;
-    const rad = (i % 2 ? r : R) * 1.22;
-    back.push([cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad]);
-  }
-  p.poly(back, INK, 0.72);
-  const pts = [];
-  for (let i = 0; i < 10; i++) {
-    const ang = -Math.PI / 2 + i * Math.PI / 5;
-    const rad = i % 2 ? r : R;
-    pts.push([cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad]);
-  }
-  p.poly(pts, cOut, 1);
-  p.glow(cx, cy, 4, cIn, 0.35);
-}
-
-// ── 6 个部位的剪影：每个重画成一眼可辨的形态 ──
-function glyphFor(id) {
-  return (p, cx, cy, R, A) => {
-    switch (id) {
-      case 'head': {                                  // 头肩：头盔（面甲 + 顶冠）+ 两侧护肩
-        p.glow(cx, cy + 3, 18, INK, 0.16);
-        shadeBody(p, cx - 18, cy + 14, 9, 7, R, { ox: -1, oy: -1, n: 2.2 });
-        shadeBody(p, cx + 18, cy + 14, 9, 7, R, { ox: -1, oy: -1, n: 2.2 });
-        p.glowRing(cx - 18, cy + 14, 9, 1.4, A[5], 0.32);
-        p.glowRing(cx + 18, cy + 14, 9, 1.4, A[5], 0.32);
-        shadeBody(p, cx, cy - 3, 16, 15, R, { ox: -2, oy: -2 });
-        softShape(p, cx - 4, cy - 7, 8, 8, R[6], 0.85, 2);            // 头盔高光（提亮）
-        p.glowRing(cx, cy - 3, 16, 1.6, A[5], 0.38);
-        softShape(p, cx, cy + 6, 12, 4, INK, 0.8);    // 面甲暗缝
-        p.glowLine(cx - 10, cy + 6, cx + 10, cy + 6, 2.2, A[6], 0.7);  // HUD 面甲光
-        p.glow(cx, cy + 6, 13, A[5], 0.45);
-        softShape(p, cx, cy - 15, 4, 5, A[6], 0.9);    // 顶冠
-        break;
-      }
-      case 'chest': {                                  // 胸甲：躯干剪影（宽肩→收腰→微展髋）+ 强 V 领 + 高对比甲片刻线 + 金黄核
-        p.glow(cx, cy + 3, 20, INK, 0.16);
-        p.poly([[cx - 14, cy - 12], [cx + 14, cy - 12], [cx + 10, cy - 1], [cx + 8, cy + 9],
-                [cx + 12, cy + 15], [cx - 12, cy + 15], [cx - 8, cy + 9], [cx - 10, cy - 1]], R[2], 1);  // 躯干多边形
-        softShape(p, cx, cy - 2, 11, 11, R[3], 0.9, 2);              // 板甲面（受光区）
-        softShape(p, cx - 3, cy - 6, 7, 8, R[5], 0.85, 2);           // 左上受光
-        softShape(p, cx - 4, cy - 8, 4, 5, R[6], 0.85, 2);           // 高光
-        p.poly([[cx - 8, cy - 13], [cx + 8, cy - 13], [cx, cy - 3]], INK, 0.78);  // 强 V 领（深 notch）
-        p.glowLine(cx, cy - 3, cx, cy + 14, 2.4, A[7], 0.75);          // 中缝（亮刻线，加粗）
-        p.glowLine(cx - 1, cy - 3, cx - 1, cy + 14, 1.5, R[0], 0.55);// 中缝暗影
-        p.glowLine(cx - 9, cy + 1, cx - 2, cy + 10, 2.4, A[7], 0.62); // 左胸片
-        p.glowLine(cx + 9, cy + 1, cx + 2, cy + 10, 2.4, A[7], 0.62); // 右胸片
-        p.glowLine(cx - 8, cy + 11, cx + 8, cy + 11, 2.4, A[7], 0.62);// 腰线
-        softShape(p, cx, cy + 3, 3.4, 3.4, A[6], 1);                 // 能量核（金黄 accent）
-        p.glow(cx, cy + 3, 7, A[5], 0.5);
-        p.glowRing(cx, cy + 3, 3.4, 1.3, A[7], 0.6);
-        break;
-      }
-      case 'belt': {                                   // 腰带：横带（提亮）+ 大金属扣 + 扣两侧实心暗孔（绘于扣后、避开口面）
-        p.glow(cx, cy + 6, 22, INK, 0.16);
-        softShape(p, cx, cy + 4, 22, 7, R[3], 1, 3);
-        softShape(p, cx, cy + 3, 20, 5, R[5], 0.92, 3);
-        softShape(p, cx, cy + 2, 17, 3, R[6], 0.85, 3);
-        p.glowRing(cx, cy + 4, 22, 1.6, A[5], 0.4);
-        softShape(p, cx, cy + 4, 9, 10, A[4], 1, 2.5);                // 扣外框（暗金）
-        softShape(p, cx, cy + 4, 6.5, 7.5, A[6], 0.95, 2.5);          // 扣面（亮金）
-        softShape(p, cx, cy + 4, 4, 5, INK, 0.7, 2.5);                // 扣眼
-        p.glowLine(cx, cy - 5, cx, cy + 13, 2.2, A[7], 0.9);          // 扣针
-        p.glowRing(cx, cy + 4, 9, 1.6, A[7], 0.6);
-        for (const hx of [-17, -13, 13, 17]) softShape(p, cx + hx, cy + 4, 2.6, 2.6, INK, 1);  // 实心暗孔（每侧2个，落在带内实心区、避开扣）
-        break;
-      }
-      case 'boots': {                                  // 鞋子：单只靴（竖直靴筒 + 向右外伸靴头 + 后跟 + 整条鞋底 + 束带）
-        p.glow(cx, cy + 6, 22, INK, 0.16);
-        softShape(p, cx - 4, cy - 2, 6, 14, R[2], 1, 2.2);            // 靴筒（竖直）
-        softShape(p, cx - 5, cy - 5, 3, 11, R[6], 0.7, 2.2);          // 筒口高光
-        softShape(p, cx + 5, cy + 12, 12, 7, R[4], 1, 2.2);           // 靴头（向右外伸）
-        softShape(p, cx + 7, cy + 11, 8, 4, R[5], 0.85, 2.2);         // 靴头受光
-        softShape(p, cx - 9, cy + 13, 4, 6, R[1], 1, 2);              // 鞋跟（左后）
-        p.glowLine(cx - 12, cy + 18, cx + 17, cy + 18, 2.8, R[0], 0.8);  // 鞋底（整条）
-        p.glowLine(cx - 7, cy + 1, cx - 1, cy + 1, 1.6, A[5], 0.6);   // 束带
-        p.glowLine(cx - 7, cy + 6, cx - 1, cy + 6, 1.6, A[5], 0.6);
-        p.glowRing(cx + 5, cy + 12, 12, 1.4, A[5], 0.3);
-        break;
-      }
-      case 'trinket': {                                // 首饰：戒指 + 宝石
-        p.glow(cx, cy + 6, 16, INK, 0.16);
-        fillRing(p, cx, cy + 5, 12, 6.5, R[5], 1);                  // 戒环
-        fillRing(p, cx, cy + 4, 10.5, 7.5, R[6], 0.85);             // 受光内圈
-        p.glowRing(cx, cy + 5, 12, 1.5, A[6], 0.5);                 // rim
-        const gy = cy - 9;
-        p.poly([[cx, gy - 7], [cx + 5, gy], [cx, gy + 7], [cx - 5, gy]], A[6], 1);  // 宝石本体
-        p.poly([[cx, gy - 7], [cx + 5, gy], [cx, gy]], A[7], 0.95);                 // 右上刻面
-        p.poly([[cx, gy + 7], [cx + 5, gy], [cx, gy]], A[4], 0.9);                  // 右下刻面
-        p.poly([[cx, gy - 7], [cx - 5, gy], [cx, gy]], A[5], 0.95);                 // 左上刻面
-        softShape(p, cx - 1.5, gy - 2, 1.8, 2.2, WHITE, 0.85);                      // 高光
-        p.glow(cx, gy, 12, A[5], 0.6);
-        break;
-      }
-      default: {                                       // 称号：横幅 + 顶杆 + 五角星 + 缎带
-        p.glow(cx, cy + 3, 18, INK, 0.16);
-        p.poly([[cx - 13, cy + 6], [cx - 5, cy + 6], [cx - 9, cy + 18]], A[3], 0.95);  // 左缎带
-        p.poly([[cx + 13, cy + 6], [cx + 5, cy + 6], [cx + 9, cy + 18]], A[3], 0.95);  // 右缎带
-        softShape(p, cx, cy - 2, 14, 16, R[1], 1, 3);                 // 旗面深底（中心保持暗）
-        softShape(p, cx, cy - 7, 11, 8, R[3], 0.9, 3);                // 仅上部受光，中心不亮
-        p.glowRing(cx, cy - 2, 14, 1.6, A[5], 0.35);
-        softShape(p, cx, cy - 16, 17, 3, R[6], 1, 2);                  // 顶杆
-        p.glowLine(cx - 15, cy - 16, cx + 15, cy - 16, 2, R[7], 0.6);
-        star(p, cx, cy - 1, 8.5, 3.6, A[6], A[4]);                     // 亮星 + 暗衬底，压暗背景托出
-        break;
-      }
-    }
-  };
-}
-
+// 每部位：主色相 r + 点缀色 x
 const GEAR = [
-  { id: 'head', name: '头肩', axis: '生存 / 要塞血量', r: RAMPS.armor, a: RAMPS.ice },
-  { id: 'chest', name: '胸甲', axis: '生存 / 减伤', r: RAMPS.armor, a: RAMPS.volt },
-  { id: 'belt', name: '腰带', axis: '节奏 / 换弹速度', r: RAMPS.metal, a: RAMPS.gold },
-  { id: 'boots', name: '鞋子', axis: '节奏 / 道具冷却', r: RAMPS.metal, a: RAMPS.swift },
-  { id: 'trinket', name: '首饰', axis: '机会 / 局内多一个选择', r: RAMPS.gold, a: RAMPS.arcane },
-  { id: 'title', name: '称号', axis: '规则位 / 修改局内规则', r: RAMPS.holy, a: RAMPS.holy },
+  { id: 'head',    num: 1, name: '头肩', axis: '生存 / 要塞血量',       r: MAT.ice,     x: MAT.volt },
+  { id: 'chest',   num: 2, name: '胸甲', axis: '生存 / 减伤',           r: MAT.steelB,  x: MAT.volt },
+  { id: 'belt',    num: 3, name: '腰带', axis: '节奏 / 换弹速度',       r: MAT.leather, x: MAT.steel },
+  { id: 'boots',   num: 4, name: '鞋子', axis: '节奏 / 道具冷却',       r: MAT.swift,   x: MAT.steel },
+  { id: 'trinket', num: 5, name: '首饰', axis: '机会 / 局内多一个选择', r: MAT.arcane,  x: MAT.arcane },
+  { id: 'title',   num: 6, name: '称号', axis: '规则位 / 修改局内规则', r: MAT.holy,    x: MAT.holy },
 ];
 
-function drawGear(p, t, c) {
-  const u = wrap(t, 2.0) / 2.0;
-  const bob = Math.sin(u * TAU) * 1.4;
-  const R = c.r, A = c.a;
-  const cx = 0, cy = bob;
-  // 精炼卡片面板（圆角矩形超椭圆 + 双层 rim 光 + 四角铆钉 + 扫光）
-  softShape(p, cx, cy, 27, 29, A[1], 0.92, 4);
-  softShape(p, cx, cy, 25, 27, A[2], 0.85, 4);
-  p.glowRing(cx, cy, 26, 2, A[4], 0.45);
-  p.glowRing(cx, cy, 24, 1.2, A[6], 0.4);
-  for (const [gx, gy] of [[-23, -25], [23, -25], [-23, 25], [23, 25]]) {
-    p.glow(gx, gy + cy, 5, A[6], 0.55);
-    p.blend(gx, gy + cy, A[7], 0.9);
+// ── 显式签名的几何 helper（绝不再允许「色值被当半径吃掉」）──
+const box = (g, x, y, w, h, c, a = 0.96) =>
+  g.shade(x, y, x + w, y + h, (px, py, o) => { o.a = a; return c; });
+const ell = (g, cx, cy, rx, ry, c, a = 0.96) => g.ellipse(cx, cy, rx, ry, c, a);
+const inPoly = (x, y, pts) => {
+  let hit = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    const [xi, yi] = pts[i], [xj, yj] = pts[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi || 1e-9) + xi) hit = !hit;
   }
-  glyphFor(c.id)(p, cx, cy, R, A);
-  const sx = -25 + 64 * wrap(u + 0.15, 1);
-  p.glowLine(sx, -27 + cy, sx, 27 + cy, 3, A[7], 0.16);
+  return hit;
+};
+const poly = (g, pts, c, a = 0.96) => {
+  const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+  g.shade(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys), (px, py, o) => {
+    if (!inPoly(px, py, pts)) return 0;
+    o.a = a; return c;
+  });
+};
+const hole = (g, cx, cy, rx, ry) => {
+  g.shade(cx - rx, cy - ry, cx + rx, cy + ry, (x, y) => {
+    const nx = (x - cx) / rx, ny = (y - cy) / ry;
+    if (nx * nx + ny * ny <= 1) g.erase(Math.floor(x), Math.floor(y));
+    return 0;
+  });
+};
+const ring = (g, cx, cy, rx, ry, ri, c) =>
+  g.shade(cx - rx, cy - ry, cx + rx, cy + ry, (x, y) => {
+    const d = Math.hypot((x - cx) / rx, (y - cy) / ry);
+    if (d > 1 || d < ri / rx) return 0;
+    return c;
+  });
+function starPts(cx, cy, Rr, rr, n = 5) {
+  const pts = [];
+  for (let i = 0; i < 2 * n; i++) {
+    const ang = -Math.PI / 2 + (i * Math.PI) / n;
+    const rad = i % 2 ? rr : Rr;
+    pts.push([cx + Math.cos(ang) * rad, cy + Math.sin(ang) * rad]);
+  }
+  return pts;
 }
 
-export const GEAR_EFFECTS = GEAR.map((c) => ({
-  id: c.id, name: c.name, spec: c.axis, mech: c.axis, read: '柔化剪影 + 三层明暗 + 加色 rim 光',
-  source: '内核新写（softShape 柔化，对齐武器侧）',
-  demoHook: `gear.slot === '${c.id}' → drawGearIcon()`,
-  mod: makeFx(frameMeta(c.name, W, H, {
-    desc: `${c.axis}｜6 部位之一，同部位只能穿 1 件`, tags: ['gear', c.id], duration: 2.0, oy: H / 2,
-  }), (p, t) => drawGear(p, t, c)),
-}));
+const GEAR_GRID = new Grid(-56, -44, W, H);
+const MAP_GRID = new Grid(-56, -44, W, H);
+
+// ─────────────────────────────────────────────────────────────
+// 6 个部位剪影（只画形体，描边由 drawGear 统一加）
+// 光向固定左上：亮档在左/上，暗档在右/下。
+// ─────────────────────────────────────────────────────────────
+const PARTS = {
+  // ① 头肩：全盔（眉檐 + 双眼缝 + 鼻梁 + 顶冠鳍）+ 三片层叠钢护肩 + 钢领轭
+  head(g, C, X) {
+    const S = MAT.steel;
+    for (const s of [-1, 1]) {                 // 护肩：本体同蓝色（同一套甲），钢边只做外缘
+      poly(g, [[s * 11, 2], [s * 26, 1], [s * 30, 8], [s * 28, 18], [s * 11, 19]], C[3]);
+      poly(g, [[s * 11, 2], [s * 26, 1], [s * 27, 5], [s * 11, 6]], C[5]);       // 顶面受光
+      poly(g, [[s * 11, 16], [s * 28, 15], [s * 28, 18], [s * 11, 19]], C[1]);   // 底缘暗
+      poly(g, [[s * 26, 1], [s * 30, 8], [s * 28, 18], [s * 26, 16]], S[4]);     // 外缘钢边
+      box(g, s * 18 - 1, 9, 2, 2, S[6]);       // 铆钉
+    }
+    g.outline(INK);
+    poly(g, [[-13, 10], [13, 10], [10, 22], [-10, 22]], S[3]);      // 领轭
+    poly(g, [[-13, 10], [-4, 10], [-6, 22], [-10, 22]], S[4]);      // 轭左受光
+    ell(g, 0, -12, 15, 12, C[3]);                                   // 穹顶
+    box(g, -14, -12, 28, 16, C[3]);                                 // 盔身
+    ell(g, 0, 3, 14, 6, C[3]);                                      // 下颌圆
+    ell(g, -4, -17, 10, 6, C[4]);                                   // 穹顶受光
+    ell(g, -7, -20, 5, 3, C[5]);                                    // 高光
+    ell(g, 7, 0, 6, 8, C[2]);                                       // 右下暗面
+    box(g, -16, -8, 32, 3, C[4]);                                   // 眉檐
+    box(g, -14, -5, 28, 9, C[1]);                                   // 面甲凹槽
+    box(g, -11, -3, 9, 3, X[3]);  box(g, 2, -3, 9, 3, X[3]);        // 左右眼缝
+    box(g, -11, -3, 9, 1, X[5]);  box(g, 2, -3, 9, 1, X[5]);        // 眼缝高光
+    box(g, -2, -6, 5, 12, C[4]);                                    // 鼻梁
+    box(g, -2, -6, 1, 12, C[5]);                                    // 鼻梁亮棱
+    box(g, -12, 6, 24, 3, C[2]);                                    // 下颌线
+    poly(g, [[-2, -32], [3, -32], [5, -13], [-1, -13]], X[3]);      // 顶冠鳍
+    poly(g, [[-2, -32], [0, -32], [0, -13], [-1, -13]], X[5]);      // 冠鳍亮棱
+    box(g, -3, -34, 8, 3, X[4]);                                    // 冠座
+  },
+
+  // ② 胸甲：整块板甲（挖领口 + 腋窝）+ 中央脊 + 腹甲 + 仪表灯
+  chest(g, C, X) {
+    // 整块甲体（钢边）→ 内嵌甲面自带 V 领缺口 → 分面缝 + 中央脊
+    const S = MAT.steel;
+    const OUT = [[-25, -15], [25, -15], [25, 4], [20, 18], [-20, 18], [-25, 4]];
+    poly(g, OUT.map(([x, y]) => [x + 2, y + 2]), S[1]);                     // 右下厚度面
+    poly(g, OUT, S[3]);                                                     // 外钢边
+    poly(g, [[-22, -12], [-9, -12], [-5, -7], [0, -3], [5, -7], [9, -12], [22, -12], [22, 3], [18, 15], [-18, 15], [-22, 3]], C[3]);
+    poly(g, [[-22, -12], [-9, -12], [-5, -7], [0, -3], [-5, -1], [-19, 1], [-22, 3]], C[4]);  // 左受光
+    poly(g, [[0, -3], [5, -7], [9, -12], [22, -12], [22, 3], [19, 1], [5, -1]], C[2]);        // 右暗面
+    g.line(-9, -12, -5, -7, C[0]); g.line(-5, -7, 0, -3, C[0]);             // 领口内衬暗线
+    g.line(9, -12, 5, -7, C[0]);  g.line(5, -7, 0, -3, C[0]);
+    box(g, -25, -15, 50, 2, S[5]);                                          // 肩线亮
+    box(g, -18, 0, 36, 2, C[1]);                                            // 上下分面缝
+    box(g, -17, 9, 34, 2, C[1]);                                            // 腹甲棱
+    box(g, -1, -1, 2, 13, C[1]);                                            // 中缝
+    box(g, -1, -1, 1, 13, C[2]);
+    for (let i = 0; i < 3; i++) box(g, 11, -9 + i * 3, 8, 1, C[1]);         // 右上排气槽
+    box(g, 11, 5, 7, 6, C[0]);                                              // 仪表灯座
+    box(g, 12, 6, 5, 4, X[3]);
+    box(g, 13, 7, 3, 2, X[6]);
+    for (const s of [-1, 1]) {                                              // 铆钉
+      box(g, s * 19 - 1, -14, 2, 2, S[0]);
+      box(g, s * 15 - 1, 15, 2, 2, S[0]);
+    }
+    g.outline(INK);
+  },
+
+  // ③ 腰带：皮革带（缝线 + 调节孔）+ 细框钢扣（扣针自顶梁垂下）
+  belt(g, C, X) {
+    const S = X;
+    box(g, -40, -9, 76, 18, C[3]);                                  // 带体
+    box(g, -40, -9, 76, 3, C[5]);                                   // 上沿受光
+    box(g, -40, 7, 76, 2, C[1]);                                    // 下沿暗
+    for (const x0 of [-40, 14]) box(g, x0, -6, 26, 1, C[2]);        // 压线（扣区两端，不进扣内）
+    for (let x = -37; x <= 11; x += 6) box(g, x, -5, 1, 1, C[1]);   // 左段缝脚
+    for (let x = 17; x <= 33; x += 6) box(g, x, -5, 1, 1, C[1]);    // 右段缝脚
+    for (let x = -37; x <= 11; x += 6) box(g, x, 4, 1, 1, C[1]);
+    for (let x = 17; x <= 33; x += 6) box(g, x, 4, 1, 1, C[1]);
+    box(g, -13, -13, 26, 3, S[5]);                                  // 扣上梁
+    box(g, -13, 11, 26, 3, S[3]);                                   // 扣下梁
+    box(g, -13, -13, 3, 27, S[4]);                                  // 扣左柱
+    box(g, 10, -13, 3, 27, S[2]);                                   // 扣右柱
+    box(g, -1, -10, 2, 18, S[6]);                                   // 扣针
+    box(g, -1, -10, 1, 18, S[5]);
+    box(g, -4, -14, 8, 4, S[5]);                                    // 针轴座（压在上梁）
+    box(g, -4, -14, 8, 1, S[6]);
+    for (const x of [20, 27, 34]) {                                 // 调节孔：暗孔 + 上沿受光
+      box(g, x, -2, 3, 4, C[0]);
+      box(g, x, -3, 3, 1, C[5]);
+    }
+    poly(g, [[33, -9], [40, -9], [40, 9], [33, 9]], C[4]);           // 带尾受光段
+    box(g, 38, -9, 2, 18, C[2]);                                     // 带尾端点
+  },
+
+  // ④ 鞋子：侧视长靴（折边筒口 + 气眼鞋带 + 束扣 + 圆鞋头 + 钢底 + 后跟）
+  boots(g, C, X) {
+    const S = X;
+    box(g, -16, -29, 21, 30, C[3]);                                  // 靴筒
+    box(g, -16, -29, 6, 30, C[4]);                                   // 筒左受光
+    box(g, -17, -31, 23, 3, C[4]);                                   // 折边
+    box(g, -17, -31, 23, 1, C[5]);
+    box(g, -16, -28, 21, 1, C[1]);                                   // 折边投影
+    for (let y = -23; y <= -7; y += 4) {                             // 侧缝走线
+      box(g, -14, y, 1, 2, C[1]);
+      box(g, 3, y, 1, 2, C[1]);
+    }
+    box(g, -16, -3, 21, 4, S[3]);                                    // 束带
+    box(g, -16, -3, 21, 1, S[5]);
+    box(g, -6, -6, 9, 5, S[5]);                                      // 束扣框
+    box(g, -4, -5, 5, 3, S[1]);                                      // 扣眼
+    poly(g, [[-16, 1], [3, 1], [6, 9], [-18, 9]], C[3]);             // 脚背
+    poly(g, [[-16, 1], [3, 1], [1, 4], [-16, 4]], C[4]);             // 脚背受光
+    box(g, -18, 7, 34, 9, C[3]);                                     // 脚掌
+    ell(g, 16, 11, 7, 5, C[3]);                                      // 圆鞋头
+    ell(g, 15, 17, 9, 3, C[1]);                                      // 侧下暗
+    ell(g, 14, 8, 5, 2, C[5]);                                       // 鞋头高光
+    box(g, -20, 15, 44, 5, S[2]);                                    // 钢底
+    box(g, -20, 15, 44, 1, S[4]);
+    box(g, -20, 19, 44, 1, S[0]);
+    box(g, -20, 11, 7, 5, S[2]);                                     // 后跟块
+    box(g, -20, 11, 7, 1, S[4]);
+  },
+
+  // ⑤ 首饰：指环（带孔）+ 宽六边宝石（台面 / 侧刻面 / 亭部）+ 双爪 + 戒台
+  trinket(g, C, X) {
+    const S = MAT.steel;
+    ell(g, 0, 10, 16, 15, C[2]);                                     // 环体
+    ell(g, 0, 10, 16, 15, C[3]);
+    hole(g, 0, 10, 9, 8);                                            // 指孔
+    ring(g, 0, 10, 16, 15, 13, C[2]);                                // 外缘暗
+    ring(g, 0, 10, 13, 12, 11, C[1]);                                // 内缘暗
+    g.shade(-17, -5, 1, 8, (x, y) => {                               // 左上受光弧
+      const d = Math.hypot(x / 16, (y - 10) / 15);
+      if (d > 1 || d < 0.80 || y > 4) return 0;
+      return C[5];
+    });
+    box(g, -10, -7, 20, 5, C[1]);                                    // 戒台
+    box(g, -10, -7, 20, 1, C[4]);
+    poly(g, [[0, -23], [9, -14], [0, -4], [-9, -14]], X[3]);            // 菱形宝石主体
+    poly(g, [[0, -23], [-9, -14], [0, -14]], X[5]);                     // 左上刻面（受光）
+    poly(g, [[0, -23], [9, -14], [0, -14]], X[3]);                      // 右上刻面
+    poly(g, [[-9, -14], [0, -14], [0, -4]], X[1]);                      // 左下刻面（暗）
+    poly(g, [[9, -14], [0, -14], [0, -4]], X[2]);                       // 右下刻面
+    g.line(0, -23, 0, -4, X[6]);                                        // 中棱高光
+    g.line(-9, -14, 0, -23, X[6]);                                      // 左上棱高光
+    box(g, -1, -24, 2, 2, S[5]);                                        // 上镶爪
+  },
+
+  // ⑥ 称号：绶带勋章（顶杆 + 双侧斜切绶带 + 章体 + 五角星）
+  title(g, C, X) {
+    const S = MAT.steel;
+    poly(g, [[-18, -35], [-6, -31], [-2, -6], [-13, -6]], C[3]);     // 左绶带
+    poly(g, [[-18, -35], [-15, -35], [-12, -9], [-13, -6]], C[4]);   // 左带外缘受光
+    poly(g, [[-13, -30], [-7, -29], [-4, -9], [-11, -9]], C[2]);     // 左带内折暗
+    poly(g, [[6, -31], [18, -35], [13, -6], [2, -6]], C[2]);         // 右绶带
+    poly(g, [[6, -31], [3, -31], [1, -9], [2, -6]], C[1]);           // 右带内折暗
+    box(g, -19, -37, 38, 3, S[4]);                                   // 顶杆
+    box(g, -19, -37, 38, 1, S[6]);
+    ell(g, 0, 9, 18, 17, C[2]);                                      // 章体底
+    ell(g, 0, 9, 17, 16, C[3]);                                      // 章体
+    ell(g, -5, 3, 10, 7, C[4]);                                      // 左上受光
+    ring(g, 0, 9, 17, 16, 14, C[1]);                                 // 章体暗缘
+    ring(g, 0, 9, 13, 12, 12, C[4]);                                 // 内圈亮线
+    poly(g, starPts(0, 9, 10, 4.4), C[6]);                           // 五角星
+    poly(g, starPts(0, 9, 6, 2.6), C[3]);                            // 星心压暗
+  },
+};
+
+// ── 光效：只做「材质该发光的地方」，范围小、不糊 ──
+const GLOWS = {
+  head:    (p, X, b) => { p.glowLine(-11, -2 + b, -2, -2 + b, 1.5, X[4], 0.5); p.glowLine(2, -2 + b, 11, -2 + b, 1.5, X[4], 0.5); },
+  chest:   (p, X, b) => { p.glow(13, 7 + b, 7, X[4], 0.34); },
+  belt:    () => {},
+  boots:   () => {},
+  trinket: (p, X, b) => { p.glow(0, -12 + b, 8, X[4], 0.26); },
+  title:   (p, X, b) => { p.glow(0, 9 + b, 12, X[5], 0.26); },
+};
+
+/** ①–⑥ 角标：深底 + 部位色环 + 白字（全类别统一） */
+function drawBadge(p, num, C) {
+  const bx = -45, by = -33;
+  p.disc(bx, by, 9, INK, 1);
+  p.disc(bx, by, 7, C[1], 1);
+  p.glowRing(bx, by, 8, 1.6, C[5], 0.55);
+  p.text(String(num), bx, by - 2, WHITE, { font: 'mini', align: 'center', a: 1 });
+}
+
+function drawGear(p, t, c) {
+  const u = wrap(t, 2.4) / 2.4;
+  const bob = Math.round(Math.sin(u * TAU) * 1.2);
+  GEAR_GRID.clear();
+  PARTS[c.id](GEAR_GRID, c.r, c.x);
+  GEAR_GRID.outline(() => INK);
+  GEAR_GRID.draw(p, 1, 0, bob);
+  GLOWS[c.id](p, c.x, bob);
+  drawBadge(p, c.num, c.r);
+}
+
+// ── 装备部位总览：人形居中，6 个编号槽位排在两侧列，引线指到部位 ──
+const MAP_SLOTS = [
+  { x: -38, y: -28, r: MAT.ice,     n: 1, lx: -13, ly: -28 },  // 头肩 → 头盔左侧
+  { x: -40, y: -8,  r: MAT.steelB,  n: 2, lx: -18, ly: -8  },  // 胸甲 → 胸甲左侧
+  { x: -40, y: 12,  r: MAT.leather, n: 3, lx: -12, ly: 12  },  // 腰带 → 腰部左侧
+  { x: -38, y: 32,  r: MAT.swift,   n: 4, lx: -11, ly: 31  },  // 鞋子 → 左脚外侧
+  { x: 38,  y: -18, r: MAT.arcane,  n: 5, lx: 19,  ly: -14 },  // 首饰（悬浮位）
+  { x: 38,  y: 12,  r: MAT.holy,    n: 6, lx: 15,  ly: 6   },  // 称号（悬浮位）
+];
+
+function drawMap(p) {
+  const S = MAT.steel, T = MAT.steelB;
+  MAP_GRID.clear();
+  box(MAP_GRID, -2, -20, 5, 5, S[2]);                                       // 颈
+  ell(MAP_GRID, 0, -28, 8, 9, S[4]);                                        // 头
+  ell(MAP_GRID, -2, -31, 5, 4, S[5]);
+  poly(MAP_GRID, [[-12, -19], [12, -19], [9, 7], [-9, 7]], T[3]);           // 躯干
+  poly(MAP_GRID, [[-12, -19], [-2, -19], [-2, 7], [-9, 7]], T[4]);          // 躯干左受光
+  box(MAP_GRID, -19, -17, 6, 21, S[3]); box(MAP_GRID, 13, -17, 6, 21, S[3]); // 双臂
+  box(MAP_GRID, -10, 7, 20, 5, S[2]);                                       // 胯
+  box(MAP_GRID, -9, 11, 7, 20, S[3]); box(MAP_GRID, 2, 11, 7, 20, S[3]);    // 双腿
+  box(MAP_GRID, -11, 30, 10, 4, S[1]); box(MAP_GRID, 1, 30, 10, 4, S[1]);   // 双脚
+  MAP_GRID.outline(() => INK);
+  MAP_GRID.draw(p, 1, 0, 0);
+
+  for (const s of MAP_SLOTS) {
+    const dx = s.lx - s.x, dy = s.ly - s.y, L = Math.hypot(dx, dy) || 1;
+    p.glowLine(s.x + (dx / L) * 9, s.y + (dy / L) * 9, s.lx, s.ly, 1, MAT.steel[2], 0.85);
+    p.disc(s.x, s.y, 9, INK, 1);
+    p.disc(s.x, s.y, 7, s.r[3], 1);
+    p.glowRing(s.x, s.y, 8, 1.6, s.r[5], 0.5);
+    p.text(String(s.n), s.x, s.y - 2, WHITE, { font: 'mini', align: 'center', a: 1 });
+  }
+}
+
+const MAP_ITEM = {
+  id: 'gear-map', name: '装备部位总览', spec: '07 册 6 部位在人形上的落点',
+  mech: '①头肩 ②胸甲 ③腰带 ④鞋子 ⑤首饰(悬浮) ⑥称号(悬浮)；同部位只能穿 1 件',
+  read: '人形居中 + 两侧编号色标槽位 + 引线定位，缩略图也分得清',
+  source: '内核新写（Grid 人形 + 编号槽位）',
+  demoHook: '装备界面 → 槽位高亮',
+  mod: {
+    meta: frameMeta('装备部位总览', W, H, { desc: '人形 + 6 编号槽位', tags: ['gear', 'map'], duration: 4, loop: true, fps: 24, oy: H / 2 }),
+    draw: (p) => drawMap(p),
+  },
+};
+
+export const GEAR_EFFECTS = [
+  MAP_ITEM,
+  ...GEAR.map((c) => ({
+    id: c.id, name: c.name, spec: c.axis, mech: c.axis,
+    read: '三档明暗 + 1px INK 描边 + 部位色编号角标（规范见文件头）',
+    source: '内核新写（装备图标规范 v1）',
+    demoHook: `gear.slot === '${c.id}' → drawGearIcon()`,
+    mod: makeFx(frameMeta(c.name, W, H, {
+      desc: `${c.axis}｜6 部位之一，同部位只能穿 1 件`, tags: ['gear', c.id], duration: 2.4, oy: H / 2,
+    }), (p, t) => drawGear(p, t, c)),
+  })),
+];
