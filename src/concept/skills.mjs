@@ -43,7 +43,7 @@ const EL = {
   chev:  R(['#3d2a00', '#6b4a05', '#9c6d0a', '#c99512', '#e8bf3a', '#ffe480', '#fffbd8']),
   cyan:  R(['#04161c', '#08303c', '#0d5566', '#158a9e', '#35c2d4', '#8ee8f2', '#e0feff']),
   laser: R(['#1f1805', '#43350a', '#7a6110', '#b8911a', '#e8c23c', '#ffe680', '#fffce0']),
-  ember: R(['#120607', '#2a0a0d', '#4d1216', '#7a1e22', '#a83535', '#d05c4e', '#f0a882']),
+  ember: R(['#1c0906', '#3f1109', '#6f1d0d', '#a83013', '#dd5218', '#ff8a34', '#ffd08a']),
   chrome:R(['#0b0d10', '#1b1f24', '#2e343c', '#4a525c', '#6f7a86', '#a8b3bf', '#e8eef5']),
 };
 
@@ -54,7 +54,7 @@ const seg = (t, a, b) => clamp((t - a) / (b - a || 1e-9));
 // 1 · 温压弹：弹头升空（火红拖尾）→ 落点两段火爆（燃料空气弹）
 // ─────────────────────────────────────────────────────────────
 function drawThermo(p, t) {
-  const D = 2.4, T0 = 0.72;
+  const D = 1.55, T0 = 0.24;
   const u = wrap(t, D);
   const C = EL.fire;
   if (u > T0) scorch(p, 0, 30, 0.5);
@@ -75,11 +75,11 @@ function drawThermo(p, t) {
   }
 
   // 接触即爆：一段，不延迟（06 册「燃料空气弹」是加成卡 ⑥，不加强时就是单段）
-  const k1 = (u - T0) / 0.50;
+  const k1 = (u - T0) / 0.30;
   if (k1 < 1) blast(p, 0, -12, 24, k1, C, { debris: 12 });
 
   // 残留：火圈 + 余烟 + 余烬
-  const after = seg(u, T0 + 0.35, D);
+  const after = seg(u, T0 + 0.22, D);
   if (after > 0) {
     smoke(p, -6, -12 - 16 * after, 18, 0.85 * (1 - after * 0.25));
     smoke(p, 9, -16 - 18 * after, 12, 0.60 * (1 - after * 0.35));
@@ -101,7 +101,7 @@ function drawThermo(p, t) {
 // 2 · 干冰弹：冰弹 + 冷雾尾 → 霜环 + 冰封
 // ─────────────────────────────────────────────────────────────
 function drawDryice(p, t) {
-  const D = 2.8, T0 = 0.8;
+  const D = 1.55, T0 = 0.24;
   const u = wrap(t, D);
   const C = EL.ice;
 
@@ -127,7 +127,7 @@ function drawDryice(p, t) {
   }
 
   // 命中：霜环扩散 + 霜针生长
-  const k = seg(u, T0, T0 + 0.55);
+  const k = seg(u, T0, T0 + 0.34);
   const r = 8 + 26 * ease.outQuad(k);
   groundRing(p, 0, GROUND - 2, r, C[5], 1, k < 0.7 ? 2 : 1);
   groundRing(p, 0, GROUND - 2, r * 0.62, C[6], 0.9, 1);
@@ -142,7 +142,7 @@ function drawDryice(p, t) {
   p.glow(0, GROUND - 2, 34, C[4], 0.22 * (1 - seg(u, T0 + 0.5, D)));
 
   // 冰封：中心长起一簇冰晶（代表被冻住的目标）
-  const fb = seg(u, T0 + 0.12, T0 + 0.45);
+  const fb = seg(u, T0 + 0.06, T0 + 0.30);
   if (fb > 0) {
     const G = GROUND - 2;
     const crystals = [
@@ -536,10 +536,10 @@ function drawFlamezone(p, t) {
   // 火床：三层压扁椭圆叠出「整片在烧」的实体（只有火舌没有床 = 一圈蜡烛）
   if (grow > 0.02) {
     const flick = 1 + 0.04 * Math.sin(t * 13) + 0.03 * Math.sin(t * 21);
-    p.ellipse(0, GROUND, R0 * 0.94 * flick, R0 * 0.31 * flick, C[1], 1);
-    p.ellipse(0, GROUND - 1, R0 * 0.74 * flick, R0 * 0.24, C[2], 1);
-    p.ellipse(0, GROUND - 1, R0 * 0.50, R0 * 0.17, C[3], 1);
-    if (heat > 0.55) p.ellipse(0, GROUND - 1, R0 * 0.28, R0 * 0.10, C[4], 1);
+    p.ellipse(0, GROUND, R0 * 0.94 * flick, R0 * 0.31 * flick, C[2], 1);
+    p.ellipse(0, GROUND - 1, R0 * 0.74 * flick, R0 * 0.24, C[3], 1);
+    p.ellipse(0, GROUND - 1, R0 * 0.50, R0 * 0.17, C[4], 1);
+    if (heat > 0.55) p.ellipse(0, GROUND - 1, R0 * 0.28, R0 * 0.10, C[5], 1);
   }
 
   // 火舌：沿椭圆分布，底部要宽并互相重叠，才连成一片
@@ -638,9 +638,9 @@ function drawSaw(p, t) {
 // ─────────────────────────────────────────────────────────────
 const SKILLS = [
   { id: 'thermo', name: '温压弹', el: '火系 · 点→圆（落点）', mech: '弹头直线飞行 → 接触即爆（单段）→ 地面余火',
-    read: '弹道笔直不歪；碰到就炸，不延迟（「两段爆」是加成卡 ⑥，未加强时就是单段）', draw: (p, t) => drawThermo(p, t), D: 2.4 },
+    read: '弹速对齐精准步枪（约 0.24s 贯穿全屏）；碰到就炸、爆点 0.30s 收掉（「两段爆」是加成卡 ⑥）', draw: (p, t) => drawThermo(p, t), D: 1.55 },
   { id: 'dryice', name: '干冰弹', el: '冰系 · 点→小圆（落点）', mech: '冰弹 + 冷雾尾 → 霜环扩散 + 冰封',
-    read: '弹道笔直；全程无火：霜点、冰棱、冰晶簇，冷调压到底', draw: (p, t) => drawDryice(p, t), D: 2.8 },
+    read: '弹速同温压弹；全程无火：霜点、冰棱、冰晶簇，冷调压到底', draw: (p, t) => drawDryice(p, t), D: 1.55 },
   { id: 'thunder', name: '电磁天雷', el: '能量系 · 精准单点（空降）', mech: '积云瞬闪 → 一道雷精确劈中单点（1.15s 全程）',
     read: '快、准、只打一个点：不做大范围地环，命中是小核 + 电刺 + 紧环', draw: (p, t) => drawThunder(p, t), D: 1.15 },
   { id: 'vehicle', name: '装甲车', el: '物理系 · 实体（纵向）', mech: '方盒子装甲车缓慢推进（只有履带在滚，车身不动）→ 到位撞击',
