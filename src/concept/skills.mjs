@@ -27,6 +27,7 @@ import { WHITE, frameMeta, makeFx } from './pixel-lib.mjs';
 import { hex } from '../../vendor/pixelfx/src/core/color.js';
 import { wrap, TAU, clamp, ease } from '../../vendor/pixelfx/src/core/index.js';
 import { R, GROUND, GROUND_K, rnd, groundRing, shockRing, trail, blast, smoke, embers, scorch, arc } from './skill-lib.mjs';
+import { drawFlameField, FLAME_RAMP } from './flame-field.mjs';
 
 const W = 112, H = 88;
 
@@ -43,7 +44,7 @@ const EL = {
   chev:  R(['#3d2a00', '#6b4a05', '#9c6d0a', '#c99512', '#e8bf3a', '#ffe480', '#fffbd8']),
   cyan:  R(['#04161c', '#08303c', '#0d5566', '#158a9e', '#35c2d4', '#8ee8f2', '#e0feff']),
   laser: R(['#1f1805', '#43350a', '#7a6110', '#b8911a', '#e8c23c', '#ffe680', '#fffce0']),
-  ember: R(['#1c0906', '#3f1109', '#6f1d0d', '#a83013', '#dd5218', '#ff8a34', '#ffd08a']),
+  ember: FLAME_RAMP,   // 与 flame-field.mjs 共用一份色阶（别再各写一套）
   chrome:R(['#0b0d10', '#1b1f24', '#2e343c', '#4a525c', '#6f7a86', '#a8b3bf', '#e8eef5']),
 };
 
@@ -509,65 +510,16 @@ const FLAMES = Array.from({ length: 16 }, (_, i) => ({
 }));
 
 function drawFlamezone(p, t) {
+  // 2026-11-05 试点：燃烧地带不再单独一套画法，直接调 flame-field.mjs 的同一份实现。
+  // demo 也是调它 —— 「概念图 = demo」从这里开始。
   const D = 4.0;
-  const u = wrap(t, D);
-  const C = EL.ember;
-  const RMAX = 26;
-
-  const grow = ease.outQuad(seg(u, 0.10, 1.45));     // 扩散
-  const fade = ease.inQuad(seg(u, 2.85, 3.80));      // 熄灭
-  const R0 = 3 + (RMAX - 3) * grow;
-  const heat = 1 - fade * 0.85;                      // 总体热度
-
-  // 焦土（先烧黑，熄灭后留着）
-  if (u > 0.1) p.ellipse(0, GROUND, R0 * 1.06, R0 * 0.36, hex('#140c0a'), 1);
-  // 地面热辉
-  if (heat > 0.05) p.glow(0, GROUND, R0 * 1.5, C[3], 0.36 * heat);
-
-  // 起燃点：中心小火苗（0 ~ 0.5s）
-  if (u < 0.55) {
-    const k = seg(u, 0, 0.35);
-    const h = 5 + 7 * k;
-    p.poly([[0, GROUND], [2, GROUND - h], [-2, GROUND - h * 0.55]], C[6], 1);
-    p.poly([[-1, GROUND], [0, GROUND - h * 0.7], [-2, GROUND - h * 0.3]], C[5], 1);
-    p.glow(0, GROUND - h * 0.4, 9, C[5], 0.55 * k);
-  }
-
-  // 火床：三层压扁椭圆叠出「整片在烧」的实体（只有火舌没有床 = 一圈蜡烛）
-  if (grow > 0.02) {
-    const flick = 1 + 0.04 * Math.sin(t * 13) + 0.03 * Math.sin(t * 21);
-    p.ellipse(0, GROUND, R0 * 0.94 * flick, R0 * 0.31 * flick, C[2], 1);
-    p.ellipse(0, GROUND - 1, R0 * 0.74 * flick, R0 * 0.24, C[3], 1);
-    p.ellipse(0, GROUND - 1, R0 * 0.50, R0 * 0.17, C[4], 1);
-    if (heat > 0.55) p.ellipse(0, GROUND - 1, R0 * 0.28, R0 * 0.10, C[5], 1);
-  }
-
-  // 火舌：沿椭圆分布，底部要宽并互相重叠，才连成一片
-  for (let i = 0; i < FLAMES.length; i++) {
-    const f = FLAMES[i];
-    const rr = R0 * f.rk;
-    const x = Math.cos(f.a) * rr;
-    const y = GROUND + Math.sin(f.a) * rr * 0.34;
-    const flick = 0.75 + 0.25 * Math.sin(t * 9 + f.ph);
-    const h = 13 * f.hk * flick * heat * (0.45 + 0.55 * grow);
-    if (h < 1.2) continue;
-    const w = 3.6 + 1.4 * f.hk;
-    p.poly([[x - w, y], [x, y - h], [x + w, y]], C[2], 1);
-    p.poly([[x - w * 0.66, y], [x + 0.2, y - h * 0.74], [x + w * 0.66, y]], C[4], 1);
-    if (heat > 0.5) p.poly([[x - w * 0.3, y], [x + 0.1, y - h * 0.46], [x + w * 0.3, y]], C[6], 1);
-  }
-
-  // 内部余烬 + 上升火星
-  if (heat > 0.2) embers(p, 0, GROUND - 2, R0 * 1.5, 8, C, t, 0.9 * heat);
-
-  // 熄灭：烟往上走，火舌退成暗红余烬
-  if (fade > 0) {
-    for (let i = 0; i < 5; i++) {
-      const ph = (u * 0.6 + rnd(i, 8)) % 1;
-      p.disc(Math.cos(rnd(i, 9) * TAU) * R0 * 0.7, GROUND - 6 - ph * 20, 5 + ph * 6,
-        hex('#4a4442'), 0.30 * fade * (1 - ph));
-    }
-  }
+  drawFlameField(p, wrap(t, D), {
+    r: 26,
+    dur: D,
+    oy: GROUND,
+    brick: 0,                 // 卡片里不画砖缝（画布没有砖背景）
+    seed: 3,
+  });
 }
 
 // ─────────────────────────────────────────────────────────────
