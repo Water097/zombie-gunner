@@ -30,8 +30,10 @@ const TYPE_MAP = {
 };
 
 // 每种的贴图缩放：让史莱姆的视觉宽度 ≈ 碰撞半径的 2 倍（碰撞判定不变，只改观感）
+// 2026-11-05：normal 1.50 → 1.10，用户反馈普通史莱姆太大（1.50 时视觉宽 45px，
+// 而它的碰撞半径只有 16）。1.10 正好 ≈ 2×半径，符合下面这条自己的约定。
 const SCALE = {
-  normal: 1.50, swift: 1.15, armor: 2.00, bomber: 1.55,
+  normal: 1.10, swift: 1.15, armor: 2.00, bomber: 1.55,
   ranged: 1.60, swarm: 1.05, flyer: 1.50, splitter: 1.90,
 };
 

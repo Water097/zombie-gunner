@@ -225,10 +225,15 @@ console.log('— SoftFx 状态机（触发 / 只读 / 生命周期） —');
   ok('syncWorld 不写 world（渲染层只读）', JSON.stringify(w) === snapAfterEdit && fx.items.length > 0 && w.level === 2 && w.rings.length === 1);
   ok('升级触发 levelUp 实例', fx.items.some((it) => it.kind === 'levelUp' && it.level === 2));
   const loots = fx.items.filter((it) => it.kind === 'loot');
-  ok('击杀触发掉落道具（1~3 个）', loots.length >= 1 && loots.length <= 3);
-  ok('掉落实例保留分派键 kind=loot，子类型单独存 lootKind',
-    loots.every((it) => ['coin', 'shard', 'gem'].includes(it.lootKind)));
-  ok('掉落点取自逻辑层最后一个 ring 附近', loots.every((it) => Math.abs(it.x - 100) <= 20 && Math.abs(it.y - 300) <= 20));
+  // 2026-11-05 用户要求：经验不要再从画面底部飘到顶部经验条，直接加经验即可。
+  // 击杀不再触发 loot（货币与掉落本阶段不做）。下面改成反向验证，
+  // 防止以后有人把这段不小心接回来。
+  ok('击杀不再触发掉落特效（取消经验飞条）', loots.length === 0);
+  ok('syncWorld 只产出升级特效', fx.items.every((it) => it.kind === 'levelUp'));
+  ok('loot 通道本身仍可用（手动触发不报错）', (() => {
+    fx.loot(100, 300, 'gem');
+    return fx.items.some((it) => it.kind === 'loot' && it.lootKind === 'gem');
+  })());
 
   const before = fx.items.length;
   fx.syncWorld(w); fx.syncWorld(w);
@@ -236,7 +241,7 @@ console.log('— SoftFx 状态机（触发 / 只读 / 生命周期） —');
 
   const fx2 = new SoftFx({ seed: 6 });
   const w2 = stub(); fx2.syncWorld(w2); w2.killCount = 10; fx2.syncWorld(w2);
-  ok('单帧大量击杀掉落数封顶 3', fx2.items.filter((it) => it.kind === 'loot').length === 3);
+  ok('单帧大量击杀也不产生掉落（掉落本阶段不做）', fx2.items.filter((it) => it.kind === 'loot').length === 0);
 
   const fx3 = new SoftFx({ seed: 7 });
   fx3.levelUp(10, 20, 3); fx3.loot(1, 2, 'gem'); fx3.poof(3, 4);

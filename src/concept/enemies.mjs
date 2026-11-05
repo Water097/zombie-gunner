@@ -23,23 +23,25 @@ const W_CANVAS = 112, H_CANVAS = 96;
 const CFG = {
   normal: {
     name: '普通史莱姆', mech: '基础推进 · 检验清群 DPS',
-    shape: '圆顶软脚果冻', motion: '标准弹跳（抛物线 + 弹簧余震 + 水滴爬回）',
-    r: RAMPS.green, W: 30, H: 22, hop: 24, D: 1.8, kind: 'normal', puddle: true,
+    // 2026-11-05 用户要求改蠕动：原「标准弹跳（抛物线 + 弹簧余震）」跳得太抢眼，
+    // 也不好和技能特效区分，改成贴地蠕动（一拱一拱往前蹭）。
+    shape: '圆顶软脚果冻', motion: '贴地蠕动（一拱一拱往前蹭，不离地、不跳）',
+    r: RAMPS.green, W: 30, H: 22, hop: 0, D: 1.8, kind: 'normal',
   },
   swift: {
     name: '疾行史莱姆', mech: '高速突进 · 压缩反应窗口',
-    shape: '扁平梭形 + 拉长拖影', motion: '贴地滑行 + 间歇冲刺（完全不跳）',
-    r: RAMPS.swift, W: 36, H: 12, hop: 0, D: 1.1, kind: 'swift', puddle: true,
+    shape: '扁平梭形 + 拉长拖影', motion: '贴地滑行，一路向前不横摆（速度比普通快）',
+    r: RAMPS.swift, W: 36, H: 12, hop: 0, D: 1.1, kind: 'swift',
   },
   armor: {
     name: '装甲史莱姆', mech: '高血厚甲 · 需穿甲 / 冻结×3',
     shape: '方角硬壳 + 平底 + 装甲横带', motion: '沉重踏步（几乎不离地，左右摇摆 + 落地余震）',
-    r: RAMPS.armor, W: 34, H: 23, hop: 3, D: 2.2, kind: 'armor', puddle: true,
+    r: RAMPS.armor, W: 34, H: 23, hop: 3, D: 2.2, kind: 'armor',
   },
   bomber: {
     name: '自爆史莱姆', mech: '抵线自爆 · 必须单体速杀',
     shape: '带尖刺的球 + 顶部引信', motion: '原地膨胀脉动（越到周期末越涨大闪白，不跳）',
-    r: RAMPS.bomb, W: 28, H: 26, hop: 0, D: 1.9, kind: 'bomber', puddle: true,
+    r: RAMPS.bomb, W: 28, H: 26, hop: 0, D: 1.9, kind: 'bomber',
   },
   ranged: {
     name: '远程史莱姆', mech: '站定 30% 处投掷 · 考验续航',
@@ -59,7 +61,7 @@ const CFG = {
   splitter: {
     name: '分裂史莱姆', mech: '死亡分裂 · 需收尾清场',
     shape: '中间收腰的双瓣葫芦', motion: '左右分裂—合拢（横向运动，不是纵向跳）',
-    r: RAMPS.split, W: 32, H: 24, hop: 0, D: 2.0, kind: 'splitter', puddle: true,
+    r: RAMPS.split, W: 32, H: 24, hop: 0, D: 2.0, kind: 'splitter',
   },
 };
 
@@ -108,33 +110,26 @@ function motion(cfg, t) {
   const B = { kind: cfg.kind, t, D, u, cx: 0, by: 0, lean: 0, q: -1, age: 0, W: cfg.W, H: cfg.H };
   switch (cfg.kind) {
     case 'normal': {
-      const T_SQ = 0.28 * D, T_UP = 0.47 * D, T_LIFT = 0.50 * D, T_LAND = 0.80 * D;
-      const age = wrap(t - T_LAND, D);
-      B.age = age;
-      if (t >= T_LIFT && t < T_LAND) {
-        const q = (t - T_LIFT) / (T_LAND - T_LIFT);
-        B.q = q; B.by = -cfg.hop * 4 * q * (1 - q);
-        const s = curve(q, [[0, 0.34], [0.4, 0.02], [0.55, -0.05], [0.85, 0.08], [1, 0.16]]);
-        B.W = cfg.W / Math.sqrt(1 + s); B.H = cfg.H * (1 + s);
-      } else if (t >= T_UP && t < T_LIFT) {
-        const s = lerp(-0.30, 0.34, ease.outCubic(seg(t, T_UP, T_LIFT)));
-        B.W = cfg.W / Math.sqrt(1 + s); B.H = cfg.H * (1 + s);
-      } else if (t >= T_SQ && t < T_UP) {
-        const k = seg(t, T_SQ, T_UP);
-        const s = -0.30 * ease.inOutSine(k) + 0.016 * Math.sin(TAUu * 14) * smooth(0.55, 1, k);
-        B.W = cfg.W / Math.sqrt(1 + s); B.H = cfg.H * (1 + s);
-      } else {
-        const s = age < 0.06 ? -0.44 : -0.44 * spring(age - 0.06, 2.1, 4.6);
-        B.W = cfg.W / Math.sqrt(1 + s); B.H = cfg.H * (1 + s);
-        B.lean = 0.07 * Math.exp(-age * 4) * Math.sin(age * TAU * 1.9);
-        if (t < T_SQ) B.W *= 1 + 0.02 * Math.sin((t / T_SQ) * TAU);
-      }
+      // 贴地蠕动（2026-11-05 用户要求去掉跳动）：
+      // 不再有离地抛物线。节奏是「拱起 → 前压 → 塌下」，靠挤压形变表达前进，
+      // 抬升上限只有 2.4px，视觉上始终贴地。
+      B.age = wrap(t, D);
+      const q = B.age / D;                       // 0→1 一个蠕动周期
+      const arch = curve(q, [[0, 0.0], [0.32, 1.0], [0.62, 0.18], [1, 0.0]]);
+      B.by = -0.6 - 2.6 * arch;
+      // 幅度给足：只在 96 高的画布上抖 7% 是看不出来的（第一版就吃了这个亏）
+      const sq = -0.14 * arch + 0.05 * Math.sin(TAUu * 2);
+      B.W = cfg.W / Math.sqrt(1 + sq);
+      B.H = cfg.H * (1 + sq);
+      B.lean = 0.085 * Math.sin(TAUu * 2) + 0.05 * arch;
       break;
     }
     case 'swift': {
+      // 只往前冲，不左右横跳（用户反馈「反复横动有点奇怪」）：
+      // 「快」由移动速度和前倾表达；横向摆位会和逻辑层的直线前进打架，看着像在抽搐。
       const dash = Math.pow(Math.max(0, Math.sin(TAUu * 3)), 6);
-      B.cx = 13 * Math.sin(TAUu) + 8 * dash;
-      B.by = -1 - 1.5 * Math.abs(Math.sin(TAUu * 2));
+      B.cx = 1.2 * Math.sin(TAUu * 2);            // 只剩极小的重心摆动
+      B.by = -1 - 1.2 * Math.abs(Math.sin(TAUu * 2));
       B.W = cfg.W * (1 + 0.22 * dash); B.H = cfg.H * (1 - 0.12 * dash);
       B.lean = 0.10 * Math.sin(TAUu * 3 + 0.6);
       break;
@@ -287,7 +282,8 @@ function decor(g, P, C, cfg) {
   }
 }
 
-// 水洼（back 层）：成片低 dome，不是散点
+// 水洼（back 层）：⚠️ 2026-11-05 起**停用** —— 用户反馈它看起来像「每只史莱姆脚下的底座」。
+// 保留代码只为可回滚；drawBack 已改成只画极淡加色光晕。不要再接回来。
 function puddle(p, P, C) {
   const R = P.W / 2 + 3 + 6 * Math.exp(-P.age * 5), hp = 2.2;
   for (let x = Math.floor(-R); x <= Math.ceil(R); x++) {
@@ -301,8 +297,10 @@ function puddle(p, P, C) {
 
 // 4 颗水滴：抛物线飞出 → 落地 → 爬回本体（数量克制，是运动不是噪点）
 function droplets(p, P, C, cfg) {
-  if (P.kind !== 'normal' && P.kind !== 'armor') return;
-  const age = P.kind === 'normal' ? P.age : wrap(P.t - P.D * 0.78, P.D);
+  // 只留给装甲史莱姆（沉重踏步、落地溅泥）。普通史莱姆已改成贴地蠕动，
+  // 身体不离地就没有「落地」这一刻，再喷水滴会显得莫名。
+  if (P.kind !== 'armor') return;
+  const age = wrap(P.t - P.D * 0.78, P.D);
   if (age > 0.75) return;
   const G = 640;
   for (let i = 0; i < 4; i++) {
@@ -435,8 +433,10 @@ function build(id) {
 
   const drawBack = (p, t) => {
     const P = poseAt(t), C = C7;
-    if (cfg.puddle) puddle(p, P, C);
-    else p.glow(P.cx, -2, 22, C[3], 0.10);
+    // 2026-11-05 用户要求去掉「底座」：原来 puddle 在脚下画一块低矮实心 dome，
+    // 5 种敌人都有，看起来像每只史莱姆都踩着一块板。
+    // 现在只留极淡的加色光晕（把地面提亮一点点），读作「身体映在地上的光」，不是实体。
+    p.glow(P.cx, -1, P.W * 0.55 + 3, C[3], 0.07);
     if (cfg.kind === 'armor') {
       const land = Math.max(0, Math.sin(P.u * TAU * 2 - 0.9));
       p.glowRing(P.cx, -1, 8 + 14 * land, 2.5, C[2], 0.35 * land);

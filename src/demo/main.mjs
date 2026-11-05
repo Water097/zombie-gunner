@@ -24,6 +24,11 @@ const ctx = canvas.getContext('2d');
 const DPR = Math.min(window.devicePixelRatio || 1, 2); // 12 册硬指标：DPR≤2 控内存
 
 let world = createWorld();
+// 调试钩子（2026-11-05）：控制台可直接操作 world 验证表现，例如
+//   __world.flames.push({x:180,y:300,r:72,life:5000,maxLife:5000,tickTimer:0,
+//     dmgTick:22,burnMs:2000,slowMag:0.25,slowMs:1000,color:'#d1493a'})
+// 只读不写、不参与玩法逻辑，纯为验证留的口子。
+window.__world = () => world;
 // 柔和卡通特效层（2026-11-04）：借 pixelfx 的加色辉光/色阶/相位编排，纯 Canvas2D JS 实现。
 // 只读 world，不写 world；自建实例池由渲染层触发，逻辑层零改动。
 const softFx = new SoftFx({ seed: 20261104, lootTarget: { x: 44, y: 22 } });
@@ -771,43 +776,157 @@ function drawTurrets() {
     ctx.globalAlpha = 1;
   }
 }
-function drawFlames() {
-  // 燃烧地带（2026-11-05 对齐概念图）：焦土 → 三层火床 → 火舌 → 热辉
-  // 之前只有一个半透明圆，读不出「地面在烧」。
-  for (const f of world.flames) {
-    const a = Math.max(0, f.life / f.maxLife);
-    const R = f.r;
-    // 焦土
-    ctx.globalAlpha = 0.45 * a + 0.15;
-    ctx.fillStyle = '#150d09';
-    ctx.beginPath(); ctx.ellipse(f.x, f.y, R * 1.06, R * 0.34, 0, 0, TAU); ctx.fill();
-    // 火床三层（越内越亮）
-    const bed = [[0.94, 0.31, `rgba(111,29,13,${0.95 * a})`],
-                 [0.72, 0.24, `rgba(168,48,19,${0.9 * a})`],
-                 [0.46, 0.16, `rgba(221,82,24,${0.85 * a})`]];
-    for (const [rx, ry, col] of bed) {
-      ctx.globalAlpha = 1; ctx.fillStyle = col;
-      ctx.beginPath(); ctx.ellipse(f.x, f.y, R * rx, R * ry, 0, 0, TAU); ctx.fill();
+// ── 燃烧地带（2026-11-05 重做）─────────────────────────────────────────────
+// 用户反馈两点：① 和概念图完全不一样 ② 像「贴了个图」，不像在背景上生成的。
+//
+// 根因：旧版是三个完美同心椭圆 + 纯色填充。在 100px 尺度上三档色差根本看不出来，
+// 只剩一块均匀橙红；而且没有任何地面信息参与，火就浮在砖面上 = 贴纸。
+//
+// 新做法四条，每条对应一个「不真实」的来源：
+//   1) 按「归一化距离 + 确定性散列」逐 2px 格上色 → 边缘天然不规则、内部斑驳，
+//      不再是一条光滑椭圆边界；
+//   2) 每隔一条砖缝压暗线，让砖石结构透出火光 → 火是「长在砖上」而不是盖在上面；
+//   3) 远端（y 小）压暗一档、近端亮 → 符合俯视纵深，不信这条就会显得平；
+//   4) 火舌位置用散列分布、高度差拉到 3 倍，不做等距排列（等距会被读成装饰花纹）。
+//
+// 静态火床按半径缓存到离屏 canvas（key 取整到 6px），每帧只 blit 一次 + 画火舌，
+// 所以这个「重做」不会比旧版更贵。
+const FIRE = ['#0a0605', '#3a0f06', '#6b1a06', '#a32c08', '#d1470c', '#f2711c', '#ffb03a'];
+const flameBeds = new Map();
+const BRICK_ROW = 12;                       // 与背景砖块行高一致（buildBackground 的 BH）
+
+function fhash(a, b) {
+  const v = Math.sin(a * 12.9898 + b * 78.233) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+function flameBed(R) {
+  const key = Math.max(20, Math.round(R / 6) * 6);
+  const hit = flameBeds.get(key);
+  if (hit) return hit;
+  const W = Math.ceil(key * 2.5), H = Math.ceil(key * 1.2);
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  const cx = W / 2, cy = H / 2;
+  const rx = key, ry = key * 0.34;          // 地面椭圆压扁比（与概念图 GROUND_K 一致）
+  const C = 2;                              // 格子 2px：够细，又不会碎成噪点
+  const cells = [];
+  for (let y = 0; y < H; y += C) {
+    for (let x = 0; x < W; x += C) {
+      const dx = (x + 1 - cx) / rx, dy = (y + 1 - cy) / ry;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > 1.20) continue;
+      const h = fhash(x, y);
+      let lv;
+      if (d > 1.06) { if (h > 0.52) continue; lv = 0; }        // 焦土：只留薄薄一圈烤痕
+      else if (d > 0.94) lv = h > 0.50 ? 1 : 0;                // 炭边（暗红掺黑）
+      else if (d > 0.78) lv = h > 0.60 ? 3 : 2;
+      else if (d > 0.58) lv = h > 0.46 ? 4 : 3;
+      else if (d > 0.34) lv = h > 0.50 ? 5 : 4;
+      else lv = h > 0.40 ? 6 : 5;                              // 中心压到最亮两档
+      if (h > 0.96) lv = Math.min(6, lv + 1);                  // 零星亮点
+      // 纵深压暗只作用在最上沿一条：整片压暗会让火发灰、像脏。
+      if (y < cy - ry * 0.72 && lv > 2) lv -= 1;
+      cells.push(x, y, lv);
     }
-    // 火舌：沿椭圆 9 根，随 life 抖动
-    const ph = f.life / 90;
-    for (let i = 0; i < 9; i++) {
-      const ang = (i / 9) * TAU + 0.4;
-      const rr = R * (0.45 + 0.42 * ((i % 3) / 2));
-      const x = f.x + Math.cos(ang) * rr;
-      const y = f.y + Math.sin(ang) * rr * 0.34;
-      const h = (7 + 6 * ((i * 7) % 5) / 4) * a * (0.8 + 0.2 * Math.sin(ph + i));
-      ctx.globalAlpha = 0.95 * a;
-      ctx.fillStyle = '#a83013';
-      ctx.beginPath(); ctx.moveTo(x - 3, y); ctx.lineTo(x, y - h); ctx.lineTo(x + 3, y); ctx.closePath(); ctx.fill();
-      ctx.fillStyle = '#ff8a34';
-      ctx.beginPath(); ctx.moveTo(x - 1.6, y); ctx.lineTo(x + 0.2, y - h * 0.7); ctx.lineTo(x + 1.6, y); ctx.closePath(); ctx.fill();
-    }
-    // 热辉
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = `rgba(255,120,60,${0.10 * a})`;
-    ctx.beginPath(); ctx.ellipse(f.x, f.y, R * 1.3, R * 0.5, 0, 0, TAU); ctx.fill();
   }
+  for (let i = 0; i < cells.length; i += 3) {
+    g.fillStyle = FIRE[cells[i + 2]];
+    g.fillRect(cells[i], cells[i + 1], C, C);
+  }
+  // 砖缝**不在这里画**：火床会被缩放/平移贴到世界上，画在缓存里必然和背景砖缝错位。
+  // 改到 drawFlames 里按世界坐标重画（见那里的「砖缝透出」一段）。
+  flameBeds.set(key, cv);
+  return cv;
+}
+
+function drawFlames() {
+  if (!world.flames.length) return;
+  const prevSmooth = ctx.imageSmoothingEnabled;
+  ctx.imageSmoothingEnabled = false;
+  for (const f of world.flames) {
+    const t = 1 - f.life / f.maxLife;                        // 0 → 1 生命进度
+    if (t <= 0) continue;
+    const grow = Math.min(1, t / 0.16);                      // 起燃：前 16% 从中心铺开
+    const fade = t > 0.80 ? 1 - (t - 0.80) / 0.20 : 1;       // 熄灭：后 20% 收掉
+    if (fade <= 0.01) continue;
+    const R = f.r;
+    const k = grow * grow * (3 - 2 * grow);                  // smoothstep
+
+    // 1) 火床（静态底，按生命进度缩放 → 读作「从一点蔓延开」）
+    const bed = flameBed(R);
+    const bw = bed.width * (0.36 + 0.64 * k);
+    const bh = bed.height * (0.36 + 0.64 * k);
+    ctx.globalAlpha = 0.95 * fade;
+    ctx.drawImage(bed, Math.round(f.x - bw / 2), Math.round(f.y - bh / 2), Math.round(bw), Math.round(bh));
+
+    // 1.5) 砖缝透出：按**世界坐标**的砖缝位置重画暗线，只在火区椭圆覆盖范围内。
+    //      放在缓存里会被缩放带偏，对不上背景 → 一眼看出是贴纸。
+    ctx.globalAlpha = 0.90 * fade;
+    ctx.fillStyle = 'rgba(10,6,4,0.62)';
+    const ry = R * 0.34;
+    const y0 = Math.ceil((f.y - ry) / BRICK_ROW) * BRICK_ROW;
+    for (let yy = y0; yy <= f.y + ry; yy += BRICK_ROW) {
+      const dy = (yy - f.y) / ry;
+      const hw = R * Math.sqrt(Math.max(0, 1 - dy * dy));
+      if (hw > 1) ctx.fillRect(Math.round(f.x - hw), yy, Math.round(hw * 2), 1);
+    }
+
+    // 1.8) 中心热斑：随燃烧节奏呼吸的高温区。
+    //      没有它，火床只是「一块烧红的饼」；有了它才有「正在烧」的感觉。
+    const beat = 0.5 + 0.5 * Math.sin(f.life * 0.013);
+    ctx.globalAlpha = (0.30 + 0.22 * beat) * fade * k;
+    ctx.fillStyle = '#ffb03a';
+    ctx.beginPath();
+    ctx.ellipse(f.x, f.y, R * (0.30 + 0.06 * beat), R * (0.10 + 0.02 * beat), 0, 0, TAU);
+    ctx.fill();
+    ctx.globalAlpha = (0.26 + 0.18 * beat) * fade * k;
+    ctx.fillStyle = '#ffd479';
+    ctx.beginPath();
+    ctx.ellipse(f.x, f.y - 1, R * (0.15 + 0.04 * beat), R * (0.05 + 0.01 * beat), 0, 0, TAU);
+    ctx.fill();
+
+    // 2) 火舌：散列分布、高度差 3 倍（等距 9 根会读成装饰花纹）
+    const pulse = f.life * 0.0075;
+    ctx.globalAlpha = Math.min(1, 0.35 + 0.65 * fade);
+    const n = 18;
+    for (let i = 0; i < n; i++) {
+      const h1 = fhash(i * 13.7 + f.x * 0.09, i * 4.3 + f.y * 0.05);
+      const h2 = fhash(i * 2.9 + 5.1, i * 8.1 + 3.7);
+      const ang = h1 * TAU;
+      const rk = Math.pow(h2, 1.35) * 1.14;                  // 中心更密；上限 1.14 允许溢出边界
+      const x = f.x + Math.cos(ang) * R * rk;
+      const y = f.y + Math.sin(ang) * R * rk * 0.34;
+      const flick = 0.66 + 0.34 * Math.sin(pulse * 2.3 + i * 1.7);
+      // 中心更高、边缘更矮；整簇随 fade 变矮（不是整体变透明 —— 那是「关灯」不是「熄灭」）
+      const hh = Math.min(26, R * 0.42) * flick * fade * (0.35 + 0.90 * (1 - Math.min(1, rk)));
+      if (hh < 1.6) continue;
+      const w = 2.2 + 2.3 * h2;
+      ctx.fillStyle = '#c9430f';
+      ctx.beginPath(); ctx.moveTo(x - w, y + 1); ctx.lineTo(x, y - hh); ctx.lineTo(x + w, y + 1); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#f2711c';
+      ctx.beginPath(); ctx.moveTo(x - w * 0.52, y + 1); ctx.lineTo(x + 0.3, y - hh * 0.60); ctx.lineTo(x + w * 0.52, y + 1); ctx.closePath(); ctx.fill();
+      if (hh > 6) {
+        ctx.fillStyle = '#ffd479';
+        ctx.beginPath(); ctx.moveTo(x - w * 0.22, y + 1); ctx.lineTo(x + 0.2, y - hh * 0.32); ctx.lineTo(x + w * 0.22, y + 1); ctx.closePath(); ctx.fill();
+      }
+    }
+
+    // 3) 热辉：压扁的径向渐变（正圆会跟扁椭圆火区对不上，露出「两个形状」）
+    ctx.globalAlpha = 1;
+    ctx.save();
+    ctx.translate(f.x, f.y);
+    ctx.scale(1, 0.42);
+    const rg = ctx.createRadialGradient(0, 0, R * 0.15, 0, 0, R * 1.28);
+    rg.addColorStop(0, `rgba(255,150,70,${0.26 * fade})`);
+    rg.addColorStop(1, 'rgba(255,150,70,0)');
+    ctx.fillStyle = rg;
+    ctx.beginPath(); ctx.arc(0, 0, R * 1.28, 0, TAU); ctx.fill();
+    ctx.restore();
+  }
+  ctx.globalAlpha = 1;
+  ctx.imageSmoothingEnabled = prevSmooth;
 }
 
 function drawSaws() {

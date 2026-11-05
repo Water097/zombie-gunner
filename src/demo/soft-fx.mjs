@@ -334,16 +334,9 @@ export class SoftFx {
     if (this.prev.level !== null && lv > this.prev.level) {
       this.levelUp(world.player.x, world.player.y - 26, lv);
     }
-    if (this.prev.killCount !== null && kc > this.prev.killCount) {
-      const n = Math.min(3, kc - this.prev.killCount);
-      // 击杀点：逻辑层 killEnemy 会 addRing，取最后一个环的坐标，避免改动逻辑层
-      const last = world.rings[world.rings.length - 1];
-      for (let i = 0; i < n; i++) {
-        const x = last ? last.x + this.rng.range(-14, 14) : world.player.x + this.rng.range(-60, 60);
-        const y = last ? last.y + this.rng.range(-10, 10) : world.player.y - this.rng.range(60, 160);
-        this.loot(x, y, this.rng.pick(['coin', 'coin', 'shard', 'gem']));
-      }
-    }
+    // 2026-11-05：击杀掉落特效**已停用**。用户明确「经验不要再从画面底部飘到顶部经验条，
+    // 直接加经验就行」，且本阶段货币与掉落先不做。
+    // （原来这里会按击杀数生成 coin/shard/gem，飞向 lootTarget；要恢复请查 git 历史。）
     this.prev = { level: lv, killCount: kc };
   }
 
