@@ -18,6 +18,7 @@ import { Grid, toss } from '../../vendor/pixelfx/src/fx/critters/_lib.js';
 import * as fxHitSpark from '../../vendor/pixelfx/src/fx/impacts/hit-spark.js';
 import * as fxSmallBoom from '../../vendor/pixelfx/src/fx/explosions/small-explosion.js';
 import { RAMPS, frameMeta, INK } from './pixel-lib.mjs';
+import { tierRings, tierCracks, tierFx } from './tiers.mjs';
 
 const W = 112, H = 88;
 
@@ -200,13 +201,16 @@ function drawMuzzle(p, C, cfg, u, ph, firing, rc) {
 }
 
 function drawGun(p, t, cfg) {
-  const u = wrap(t, cfg.D) / cfg.D, C = fit(cfg.r, 7);
+  const u = wrap(t, cfg.D) / cfg.D;
+  const C = cfg.T ? cfg.T.body : fit(cfg.r, 7);   // 挂品级时整套配色由档位接管，剪影不动
   const ph = wrap(u * cfg.shots, 1);
   const firing = ph < cfg.flashWin;
   const rc = firing ? (1 - ph / cfg.flashWin) * cfg.recoilPx : 0;
   GRID.clear();
   SHAPES[cfg.kind](GRID, C, u, ph, rc);
   GRID.outline((x, y, nx, ny) => (ny < 0 && nx <= 0 ? C[3] : C[0]));
+  tierRings(GRID, cfg.T);                         // 品级外缘光
+  tierCracks(GRID, cfg.T, -14, 1, 9);             // 灾厄黑纹（落在机匣上，不在空处）
   GRID.draw(p);
 
   // Q4 A：剪影（outline）保持硬边不动；只用连续加色光带柔化内部明暗与金属高光。
@@ -218,6 +222,13 @@ function drawGun(p, t, cfg) {
   p.glow(0, 7, 20, C[1], 0.08);
 
   drawMuzzle(p, C, cfg, u, ph, firing, rc);
+  tierFx(p, cfg.T, t, { cx: 0, cy: 0, rx: 36, ry: 15 });   // 品级光效
+}
+
+/** 供品级对照卡复用：按型号 id + 品级画一把。 */
+export function drawWeaponWithTier(p, t, gunId, T) {
+  const cfg = GUNS.find((g) => g.id === gunId) ?? GUNS[0];
+  drawGun(p, t, { ...cfg, T });
 }
 
 export const WEAPON_EFFECTS = GUNS.map((c) => ({

@@ -23,6 +23,7 @@ import { wrap, TAU } from '../../vendor/pixelfx/src/core/index.js';
 import { hex } from '../../vendor/pixelfx/src/core/color.js';
 import { Grid } from '../../vendor/pixelfx/src/fx/critters/_lib.js';
 import { frameMeta, makeFx, INK, WHITE } from './pixel-lib.mjs';
+import { tierRings, tierCracks, tierFx } from './tiers.mjs';
 
 const W = 112, H = 88;
 
@@ -100,8 +101,7 @@ const MAP_GRID = new Grid(-56, -44, W, H);
 // ─────────────────────────────────────────────────────────────
 const PARTS = {
   // ① 头肩：全盔（眉檐 + 双眼缝 + 鼻梁 + 顶冠鳍）+ 三片层叠钢护肩 + 钢领轭
-  head(g, C, X) {
-    const S = MAT.steel;
+  head(g, C, X, S = MAT.steel) {
     for (const s of [-1, 1]) {                 // 护肩：本体同蓝色（同一套甲），钢边只做外缘
       poly(g, [[s * 11, 2], [s * 26, 1], [s * 30, 8], [s * 28, 18], [s * 11, 19]], C[3]);
       poly(g, [[s * 11, 2], [s * 26, 1], [s * 27, 5], [s * 11, 6]], C[5]);       // 顶面受光
@@ -131,9 +131,8 @@ const PARTS = {
   },
 
   // ② 胸甲：整块板甲（挖领口 + 腋窝）+ 中央脊 + 腹甲 + 仪表灯
-  chest(g, C, X) {
+  chest(g, C, X, S = MAT.steel) {
     // 整块甲体（钢边）→ 内嵌甲面自带 V 领缺口 → 分面缝 + 中央脊
-    const S = MAT.steel;
     const OUT = [[-25, -15], [25, -15], [25, 4], [20, 18], [-20, 18], [-25, 4]];
     poly(g, OUT.map(([x, y]) => [x + 2, y + 2]), S[1]);                     // 右下厚度面
     poly(g, OUT, S[3]);                                                     // 外钢边
@@ -215,8 +214,7 @@ const PARTS = {
   },
 
   // ⑤ 首饰：指环（带孔）+ 宽六边宝石（台面 / 侧刻面 / 亭部）+ 双爪 + 戒台
-  trinket(g, C, X) {
-    const S = MAT.steel;
+  trinket(g, C, X, S = MAT.steel) {
     ell(g, 0, 10, 16, 15, C[2]);                                     // 环体
     ell(g, 0, 10, 16, 15, C[3]);
     hole(g, 0, 10, 9, 8);                                            // 指孔
@@ -240,8 +238,7 @@ const PARTS = {
   },
 
   // ⑥ 称号：绶带勋章（顶杆 + 双侧斜切绶带 + 章体 + 五角星）
-  title(g, C, X) {
-    const S = MAT.steel;
+  title(g, C, X, S = MAT.steel) {
     poly(g, [[-18, -35], [-6, -31], [-2, -6], [-13, -6]], C[3]);     // 左绶带
     poly(g, [[-18, -35], [-15, -35], [-12, -9], [-13, -6]], C[4]);   // 左带外缘受光
     poly(g, [[-13, -30], [-7, -29], [-4, -9], [-11, -9]], C[2]);     // 左带内折暗
@@ -278,15 +275,27 @@ function drawBadge(p, num, C) {
   p.text(String(num), bx, by - 2, WHITE, { font: 'mini', align: 'center', a: 1 });
 }
 
-function drawGear(p, t, c) {
+function drawGear(p, t, c, T = null) {
   const u = wrap(t, 2.4) / 2.4;
   const bob = Math.round(Math.sin(u * TAU) * 1.2);
+  // 品级覆盖配色（剪影一行不动）：本体色阶与亮点色都换成档位色
+  const C = T ? T.body : c.r;
+  const X = T ? T.accent : c.x;
   GEAR_GRID.clear();
-  PARTS[c.id](GEAR_GRID, c.r, c.x);
-  GEAR_GRID.outline(() => INK);
+  PARTS[c.id](GEAR_GRID, C, X, T ? T.struct : MAT.steel);
+  GEAR_GRID.outline(() => INK);                  // 1px 硬边
+  tierRings(GEAR_GRID, T);                       // 品级外缘光（0/1/2 圈）
+  tierCracks(GEAR_GRID, T, 0, -2, 20);           // 灾厄黑纹（其他档自动跳过）
   GEAR_GRID.draw(p, 1, 0, bob);
-  GLOWS[c.id](p, c.x, bob);
-  drawBadge(p, c.num, c.r);
+  GLOWS[c.id](p, X, bob);
+  tierFx(p, T, t, { cx: 0, cy: bob, rx: 32, ry: 24 });
+  drawBadge(p, c.num, T ? T.accent : c.r);
+}
+
+/** 供品级对照卡复用：按部位 id + 品级画一张。 */
+export function drawGearWithTier(p, t, partId, T) {
+  const c = GEAR.find((g) => g.id === partId) ?? GEAR[0];
+  drawGear(p, t, c, T);
 }
 
 // ── 装备部位总览：人形居中，6 个编号槽位排在两侧列，引线指到部位 ──
