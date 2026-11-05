@@ -9,6 +9,7 @@ import { PAL } from '../../vendor/pixelfx/src/core/color.js';
 import { ENEMY_EFFECTS, DEATH_EFFECTS } from './enemies.mjs';
 import { GEAR_EFFECTS } from './equipment.mjs';
 import { GRADE_EFFECTS } from './grades.mjs';
+import { UPGRADE_EFFECTS } from './upgrade-fx.mjs';
 import { WEAPON_EFFECTS, BULLET_EFFECTS, BULLET_ATTR_EFFECTS, WEAPON_BLAST_EFFECTS } from './weapons.mjs';
 import { SKILL_EFFECTS } from './skills.mjs';
 import { ACTOR_EFFECTS } from './misc.mjs';
@@ -81,6 +82,7 @@ export const CATALOG = [
   { id: 'weapon-blasts', title: '武器类别 · 爆炸与命中', sub: '武器侧：枪口火花（按原库 hit-spark 火花语言）、精确步枪穿透余痕、榴弹炮落点爆炸（直接复用原库 small-explosion，时间轴 ×3 压到 1.8s）；末 2 张是原库对照。', items: WEAPON_BLAST_EFFECTS },
   { id: 'gear', title: '装备类别', sub: '07 册 6 个部位（头肩 / 胸甲 / 腰带 / 鞋子 / 首饰 / 称号）。第四版按「装备图标规范 v1」重画：统一左上光源 + 三档明暗 + 1px INK 描边 + 钢/皮革/宝石三材质共用色阶；每部位一个主色相（蓝/钢蓝/皮革棕/翠绿/奥术紫/圣金）+ ①–⑥ 编号角标。首图「装备部位总览」是人形居中、两侧编号槽位带引线定位。武器独立成系统不占格，同部位只能穿 1 件。⚠️ 本组用的是**部位识别色**（图鉴用）；游戏内实际配色由品级决定，见「品级对照」类别。', items: GEAR_EFFECTS },
   { id: 'tiers', title: '品级对照 · 6 档配色与光效', sub: '06 册六档（白/蓝/紫/粉/金/赤红+黑纹）落到视觉上：同一把枪、同一件甲，逐档升级**只换配色与光效，剪影一行不动**。首图是规范页（6 档色板 + 光效强度刻度）；其后 6 张突击步枪、6 张胸甲，用来验证「不看名字也能分出档」。光效层层加码：白无光 → 蓝 1 圈外缘+1 静光点 → 紫 呼吸光+2 粒子 → 粉 4 粒子+内层加色 → 金 双圈+流光 → 灾厄 双圈赤光+8 粒子+脉动环+甲面黑纹。', items: GRADE_EFFECTS },
+  { id: 'upgrade', title: '进阶特效 · 碎片升级', sub: '没有开箱，只有「碎片 → 升级」。这条时间轴要在 2 秒内说清三件事：碎片喂进去了 → 东西变了 → 变成哪一档。碎屑内收蓄力 → **爆闪（旧色换新色藏在白闪里，不让玩家看见硬切）** → 双圈冲击波 + 竖光柱 → 新档光效沉降 → 档名浮起。武器和装备共用同一条轴，只换中间图标；只有灾厄档额外多一段「黑纹蔓延」。', items: UPGRADE_EFFECTS },
   { id: 'skills', title: '技能类别', sub: '02 册 9 个技能。球体颜色读系别，中心符号读形态——避免 9 个发光球长一个样。局内 4 槽上限，一局只选 4 条线。', items: SKILL_EFFECTS },
   { id: 'currency', title: '货币与掉落', sub: '你没点名但概念图必须有的类别。3 种晶体是同一个原库特效换 palette 得到的，正好演示「重着色不改代码」。', items: CURRENCY },
   { id: 'actors', title: '角色 / 宠物 / 要塞', sub: '你没点名但绕不开的实体。库里只有特效、没有立绘，这三个是 Painter 从零写的像素帧动画。', items: ACTOR_EFFECTS },
