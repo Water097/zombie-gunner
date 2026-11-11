@@ -54,6 +54,11 @@
   .side h2{font-size:14px;color:var(--txt);margin:0 0 7px}
   .side ul{padding-left:18px;margin:0 0 12px}
   .side li{margin-bottom:4px}
+  .detail{margin:4px 0 12px}
+  .detail canvas{width:170px;height:220px;display:block;background:#0c1018;
+    border:2px solid var(--line2);box-shadow:3px 3px 0 #050a0e}
+  .detail .cap{font-size:10.5px;color:var(--dim);margin-top:5px;display:block}
+  .detail .cap b{color:var(--cy)}
   code{color:var(--cy);font-size:11px}
   .grid{display:grid;grid-template-columns:repeat(3,minmax(160px,1fr));gap:10px}
   .cell{background:var(--panel);border:2px solid var(--line);padding:7px;cursor:pointer;box-shadow:4px 4px 0 #050a0e}
@@ -119,6 +124,10 @@
       <div id="single" class="single">
         <canvas id="big" width="450" height="800"></canvas>
         <div class="side">
+          <div id="detailWrap" class="detail hidden">
+            <canvas id="detailCv" width="170" height="220"></canvas>
+            <span class="cap">弹体特写 <b>×3.5</b> · 与实机同一份绘制代码</span>
+          </div>
           <h2>快捷键</h2>
           <ul>
             <li><b>1–9</b>：切技能；<b>空格</b>：暂停/播放；<b>R</b>：重播</li>
@@ -157,6 +166,7 @@ import { LAB, blankWorld, SPECS, specById, drawBackdrop } from './src/demo/skill
 import { FlameSprites } from './src/demo/flame-sprites.mjs';
 import { S, paramSchema, boolSchema, setParam, resetParams, resetAll, durationOf } from './src/demo/lab-params.mjs';
 import { WEAPON_SPEC } from './src/demo/weapon-lab-specs.mjs';
+import { drawSkillShots } from './src/demo/skill-art.mjs';
 
 const $ = (id) => document.getElementById(id);
 const GEOM = { W: LAB.W, PET: LAB.PET, FOE: LAB.FOE };
@@ -215,6 +225,33 @@ class Stage {
       c.fillStyle = '#ffd257'; c.fillRect(0, 26, LAB.W * k, 7);
     }
   }
+}
+
+// ── 弹体特写（干冰 / 温压弹只有 ~25px，放大 3.5 倍看造型）──
+const detailWrap = $('detailWrap'), detailCv = $('detailCv');
+detailCv.width = 170; detailCv.height = 220;
+const dctx = detailCv.getContext('2d', { alpha: false });
+function drawDetail() {
+  const show = lab === 'skill' && view === 'single' && (activeId === 'freeze' || activeId === 'burn');
+  detailWrap.classList.toggle('hidden', !show);
+  if (!show) return;
+  const W = 170, H = 220;
+  dctx.globalAlpha = 1; dctx.globalCompositeOperation = 'source-over';
+  dctx.fillStyle = '#0c1018'; dctx.fillRect(0, 0, W, H);
+  dctx.strokeStyle = 'rgba(255,210,87,0.35)'; dctx.setLineDash([4, 6]); dctx.lineWidth = 1;
+  dctx.beginPath(); dctx.moveTo(W / 2, H - 14); dctx.lineTo(W / 2, 10); dctx.stroke();
+  dctx.setLineDash([]);
+  dctx.fillStyle = 'rgba(255,210,87,0.75)'; dctx.font = '10px monospace'; dctx.textAlign = 'center';
+  dctx.fillText('弹头方向 ↑', W / 2, 14);
+  // 假 world：弹体在原点、朝上；直接调实机同一份 drawSkillShots，没有第二套画法
+  const fake = { skillShots: [{ id: activeId, x: 0, y: 0, vx: 0, vy: -1,
+    radius: activeId === 'freeze' ? 6 : 7, color: '#ffffff' }] };
+  dctx.save(); dctx.translate(W / 2, 78); dctx.scale(3.5, 3.5);
+  drawSkillShots(dctx, fake, performance.now() / 1000);
+  dctx.restore();
+  dctx.globalAlpha = 1; dctx.globalCompositeOperation = 'source-over';
+  dctx.fillStyle = '#e7eefc'; dctx.font = 'bold 11px monospace'; dctx.textAlign = 'center';
+  dctx.fillText(specById(activeId).name + ' · 导弹造型', W / 2, H - 8);
 }
 
 // ── 技能 tab ────────────────────────────────────────────────
@@ -413,6 +450,7 @@ function frame(now) {
     const list = lab === 'weapon' ? [weaponStage] : view === 'grid' ? gridStages : [singleStage];
     for (const st of list) { st.step(dt); st.draw(dt); }
   }
+  drawDetail();          // 暂停时也刷新，切技能后立刻能看到对应弹体
   requestAnimationFrame(frame);
 }
 
@@ -420,6 +458,7 @@ select(SPECS[0].id);
 for (const st of gridStages) st.draw(0);
 weaponStage.draw(0);
 singleStage.draw(0);
+drawDetail();
 requestAnimationFrame(frame);
 </script>
 </body>

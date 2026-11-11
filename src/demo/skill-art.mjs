@@ -167,33 +167,111 @@ function arc(p, x0, y0, x1, y1, c, seed = 0, amp = 4) {
 // ═════════════════════════════════════════════════════════════
 
 // 1 · 温压弹：弹头升空（火红拖尾）→ 接触即爆
+/** 六角雪花（十字 + 斜十字 + 白核），参考图干冰弹四周的冰晶点缀。 */
+function snowflake(p, x, y, s, col, a = 1) {
+  p.line(x - s, y, x + s, y, col, a);
+  p.line(x, y - s, x, y + s, col, a);
+  p.line(x - s * 0.6, y - s * 0.6, x + s * 0.6, y + s * 0.6, col, a);
+  p.line(x - s * 0.6, y + s * 0.6, x + s * 0.6, y - s * 0.6, col, a);
+  p.dot(x, y, WHITE, a);
+}
+
+/**
+ * 折线辉光：逐段 glowLine，整条是**折的**，不是一条直线。
+ * 用来替代「笔直的粗辉光柱」—— 后者会被读成激光/发射源（用户明确要求去掉那根白线）。
+ */
+function boltGlow(p, x0, y0, x1, y1, col, w, a, seed, amp) {
+  const n = 7;
+  let px = x0, py = y0;
+  for (let i = 1; i <= n; i++) {
+    const t = i / n;
+    const jx = i === n ? 0 : (rnd(seed + i) - 0.5) * amp * 2;
+    const nx = x0 + (x1 - x0) * t + jx;
+    const ny = y0 + (y1 - y0) * t + (rnd(seed + i, 2) - 0.5) * amp * 0.6;
+    p.glowLine(px, py, nx, ny, w, col, a);
+    px = nx; py = ny;
+  }
+}
+
+// 1 · 干冰弹 / 温压弹：参考图的「导弹」造型（2026-11-12 重做）
+//   温压弹 = 深灰金属圆柱 + 橙红圆钝弹头 + 尾翼/喷口 + 火焰流线
+//   干冰弹 = 冰蓝金属圆柱 + 白色尖锥弹头 + 两侧三角翼 + 六角雪花
+// 旧的「菱形冰块」和「木块加三角箭头」已废弃（用户：头比尾巴大 / 像木块）。
+// 局部 -y = 弹头方向，弹体沿 ang 用 rotate(ang + π/2) 贴到速度方向。
 export function drawSkillShots(ctx, world, time) {
   const p = new P(ctx);
   for (const s of world.skillShots) {
     // 逻辑层技能 id：freeze=干冰弹（冰系），burn=温压弹（火系）
     const isIce = s.id === 'freeze';
     const C = isIce ? EL.ice : EL.fire;
+    const M = isIce ? EL.ice : EL.steel;             // 弹体色阶：冰蓝 / 深灰钢
     const ang = Math.atan2(s.vy, s.vx);
-    // 弹体尖端画在局部 -y；要让它指向标准 atan2 角 ang，需 rotate(ang + π/2)。
-    // 只 rotate(ang) 会让弹头横过来（用户反馈「弹体水平于屏幕」的根因）。
     ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(ang + Math.PI / 2);
-    const r = s.radius;
-    // 拖尾
-    trail(p, 0, r + 4, 22, 5, C, time * 3, { sway: 0 });
+    const r = Math.max(5, s.radius);
+    const bw = r * 0.82;                             // 弹体半宽（粗壮导弹，尾翼展开后明显比头宽）
+    const tip = -r * 2.5;                            // 弹头尖
+    const shoulder = -r * 0.85;                      // 头 / 体交界
+    const bodyEnd = r * 1.35;                        // 弹体尾
+    const tail = r * 1.85;                           // 尾喷口
+
+    // ── 尾焰 / 冷雾（在弹体之后）──
+    trail(p, 0, tail + 1, 20, isIce ? 3.2 : 4.6, C, time * 3, { sway: 0 });
     if (isIce) {
-      // 冰晶弹：菱形晶体
-      p.poly([[0, -r - 4], [r * 0.6, -r], [0, r * 0.7], [-r * 0.6, -r]], C[4], 1);
-      p.poly([[0, -r - 4], [-r * 0.6, -r], [0, -r]], C[6], 1);
-      p.poly([[0, -r - 4], [r * 0.6, -r], [0, -r]], WHITE, 1);
-      p.poly([[0, -r], [r * 0.6, -r], [0, r * 0.7]], C[3], 1);
-      p.poly([[0, -r], [-r * 0.6, -r], [0, r * 0.7]], C[5], 1);
-    } else {
-      // 火弹：白尖 + 橙身 + 尾翼
-      p.poly([[0, -r - 6], [r * 0.5, -r], [r * 0.5, r], [-r * 0.5, r], [-r * 0.5, -r]], C[5], 1);
-      p.poly([[0, -r - 6], [r * 0.35, -r], [-r * 0.35, -r]], WHITE, 1);
-      p.rect(-r * 0.6, r - 1, r * 1.2, 2, C[2], 1);
+      for (let i = 0; i < 5; i++) {
+        const ph = (time * 2 + rnd(i)) % 1;
+        p.dot(Math.round((rnd(i, 2) - 0.5) * 10 * (0.4 + ph)), Math.round(tail + 3 + ph * 12), C[6], 1 - ph);
+      }
     }
-    p.glow(0, 0, r * 2.2 + 6, C[4], 0.3);
+
+    // ── 尾翼（后部两侧三角）──
+    const fin = isIce ? r * 1.05 : r * 0.8;
+    const finC = isIce ? C[3] : EL.steel[2], finHi = isIce ? C[5] : C[4];
+    p.poly([[-bw, bodyEnd - 4], [-bw - fin, tail + 2], [-bw, tail]], finC, 1);
+    p.poly([[bw, bodyEnd - 4], [bw + fin, tail + 2], [bw, tail]], finC, 1);
+    p.poly([[-bw, bodyEnd - 4], [-bw - fin * 0.6, tail], [-bw, tail]], finHi, 1);
+    p.poly([[bw, bodyEnd - 4], [bw + fin * 0.6, tail], [bw, tail]], finHi, 1);
+
+    // ── 尾喷口 ──
+    p.rect(-bw * 0.72, bodyEnd, bw * 1.44, 3, C[2], 1);
+    p.rect(-bw * 0.42, bodyEnd + 1, bw * 0.84, 1.5, isIce ? C[6] : WHITE, 1);
+
+    // ── 圆柱弹体：左受光 / 右压暗 / 中央高光，做出体积 ──
+    const bodyH = bodyEnd - shoulder;
+    p.rect(-bw, shoulder, bw * 2, bodyH, M[2], 1);
+    p.rect(-bw, shoulder, bw * 0.65, bodyH, M[4], 1);
+    p.rect(bw * 0.5, shoulder, bw * 0.5, bodyH, M[1], 1);
+    p.rect(-bw * 0.18, shoulder, bw * 0.3, bodyH, M[5], 1);
+    p.rect(-bw, shoulder + bodyH * 0.42, bw * 2, 2, C[4], 1);   // 识别环带
+    p.rect(-bw, shoulder + bodyH * 0.72, bw * 2, 1, C[5], 1);
+
+    // ── 弹头 ──
+    if (isIce) {
+      // 白色尖锥（参考图右）
+      p.poly([[0, tip], [bw, shoulder], [-bw, shoulder]], C[4], 1);
+      p.poly([[0, tip], [bw * 0.55, shoulder], [0, shoulder]], C[6], 1);
+      p.poly([[0, tip], [-bw * 0.55, shoulder], [0, shoulder]], WHITE, 1);
+      p.line(0, tip, 0, shoulder, WHITE, 0.8);
+      p.glow(0, tip + r * 0.6, r * 1.5, C[6], 0.35);
+    } else {
+      // 橙红圆钝头（参考图左）
+      p.ellipse(0, shoulder, bw, r * 0.95, C[3], 1);
+      p.ellipse(0, shoulder - r * 0.15, bw * 0.78, r * 0.72, C[5], 1);
+      p.ellipse(-bw * 0.25, shoulder - r * 0.35, bw * 0.34, r * 0.3, C[6], 1);
+      p.dot(0, shoulder - r * 0.5, WHITE, 1);
+      p.glow(0, shoulder, r * 1.7, C[4], 0.40);
+    }
+
+    // ── 氛围点缀 ──
+    if (isIce) {
+      snowflake(p, -bw - r * 1.3, -r * 0.4, 3, WHITE, 0.85);
+      snowflake(p, bw + r * 1.2, r * 0.5, 2.4, C[6], 0.8);
+      snowflake(p, -bw - r * 0.9, r * 1.1, 2, C[5], 0.7);
+    } else {
+      p.poly([[-bw - 2, shoulder + 2], [-bw - r * 1.1, r * 0.3], [-bw - 1, bodyEnd - 2]], C[4], 0.8);
+      p.poly([[bw + 2, shoulder + 4], [bw + r * 0.9, r * 0.6], [bw + 1, bodyEnd - 1]], C[5], 0.8);
+      p.glow(0, tail, r * 1.6, C[4], 0.40);
+    }
+    p.glow(0, 0, r * 2.4, C[4], 0.22);
     ctx.restore();
   }
   p.reset();
@@ -225,17 +303,20 @@ export function drawStrikes(ctx, world, time) {
       p.glow(s.x, topY - 4, s.minor ? 12 : 22, C[4], 0.10 + 0.30 * cloud);
     }
 
-    // ② 落雷：从云底长到落点，逐帧抖动
+    // ② 落雷：三层**折线辉光**，从云底长到落点，逐帧抖动。
+    // ⚠️ 2026-11-12 删掉笔直的 glowLine 光柱 + amp 仅 3.2 的近直线白色 arc：
+    //    那两样叠起来会被读成「从发射源射下来的一道白线 / 激光」，用户明确不要。
     const boltK = seg(k, 0.18, 0.42);
     if (boltK > 0 && k < 0.80) {
       const endY = lerp(topY, GY, ease.outQuad(boltK));
       const fade = 1 - seg(k, 0.58, 0.80);
-      p.glowLine(s.x, topY, s.x, endY, w, C[5], 0.25 * fade);
-      arc(p, s.x, topY, s.x, endY, C[6], frame, 7);
-      arc(p, s.x, topY, s.x, endY, WHITE, frame + 9, 3.2);
+      const amp = s.minor ? 8 : 13;
+      boltGlow(p, s.x, topY, s.x, endY, C[4], w, 0.26 * fade, frame, amp);
+      boltGlow(p, s.x, topY, s.x, endY, C[6], w * 0.45, 0.65 * fade, frame + 7, amp * 0.8);
+      boltGlow(p, s.x, topY, s.x, endY, WHITE, 1.6, 0.85 * fade, frame + 15, amp * 0.6);
       if (!s.minor) {
-        arc(p, s.x - 3, topY + (endY - topY) * 0.55, s.x - 10, Math.min(GY, endY + 12), C[4], frame + 3, 5);
-        arc(p, s.x + 3, topY + (endY - topY) * 0.70, s.x + 9, Math.min(GY, endY + 10), C[4], frame + 5, 5);
+        boltGlow(p, s.x - 3, topY + (endY - topY) * 0.55, s.x - 10, Math.min(GY, endY + 12), C[4], 2, 0.5 * fade, frame + 3, 6);
+        boltGlow(p, s.x + 3, topY + (endY - topY) * 0.70, s.x + 9, Math.min(GY, endY + 10), C[4], 2, 0.5 * fade, frame + 5, 6);
       }
     }
 
@@ -305,8 +386,10 @@ export function drawArcs(ctx, world) {
   const p = new P(ctx); const C = EL.volt;
   for (const a of world.arcs) {
     const al = Math.max(0, a.life / a.maxLife);
-    p.glowLine(a.pts[0].x, a.pts[0].y, a.pts[a.pts.length - 1].x, a.pts[a.pts.length - 1].y, 6, C[4], al * 0.35);
-    // 折线芯
+    // 外层辉光按段走折线，不再画一条贯穿首尾的直线
+    for (let i = 0; i < a.pts.length - 1; i++) {
+      boltGlow(p, a.pts[i].x, a.pts[i].y, a.pts[i + 1].x, a.pts[i + 1].y, C[4], 4, al * 0.35, i * 7 + 1, 6);
+    }
     for (let i = 0; i < a.pts.length - 1; i++) arc(p, a.pts[i].x, a.pts[i].y, a.pts[i + 1].x, a.pts[i + 1].y, WHITE, i + 1, 5);
     p.glow(a.pts[a.pts.length - 1].x, a.pts[a.pts.length - 1].y, 8, C[5], al * 0.5);
   }
