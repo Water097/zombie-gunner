@@ -148,7 +148,8 @@ export function durationOf(id, geom) {
     case 'freeze': case 'burn':
       return Math.max(0.3, (PET.y - FOE.y + 120) / Math.max(p.speed, 60));
     case 'shock':
-      return Math.max(0.4, Math.max(p.flashMs, p.arcMs, p.stormMs) / 1000 + 0.35);
+      // 基础天雷只演落雷（弹射/雷暴是节点卡），循环时长跟着落雷演出走
+      return Math.max(0.5, p.flashMs / 1000 + 0.45);
     case 'vehicle': return Math.max(0.5, p.lifeMs / 1000);
     case 'ray': return Math.max(0.2, p.durMs / 1000);
     case 'laser': return Math.max(0.2, p.durMs / 1000);

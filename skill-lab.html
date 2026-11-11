@@ -184,18 +184,24 @@ let lab = 'skill', view = 'single', activeId = SPECS[0].id;
 let playing = true, speed = 1, autoLoop = true, useCooldown = false, showAxis = true;
 const cooldownOf = (id) => (S[id] && Number.isFinite(S[id].cooldownMs)) ? S[id].cooldownMs / 1000 : 0;
 
-// 命中时刻（占演出时长比例）与次数 —— 让实验室里看得见「敌人受击」。
-// 伤害值取当前可调参数，所以调伤害/持续时间时飘字与血条会跟着变。
-const HIT_PROFILE = {
-  freeze:  { dmg: 'dmg',       at: 0.58, count: 1, gap: 0,    tag: '冻结' },
-  burn:    { dmg: 'dmg',       at: 0.58, count: 1, gap: 0,    tag: '灼烧' },
-  shock:   { dmg: 'strikeDmg', at: 0.42, count: 1, gap: 0,    tag: '感电' },
-  vehicle: { dmg: 'dmg',       at: 0.42, count: 3, gap: 0.10, tag: '碾压' },
-  ray:     { dmg: 'dmg',       at: 0.30, count: 6, gap: 0.10, tag: '射线' },
-  laser:   { dmg: 'dmg',       at: 0.28, count: 5, gap: 0.10, tag: '扫射' },
-  turret:  { dmg: 'dmg',       at: 0.28, count: 3, gap: 0.18, tag: '炮击' },
-  flame:   { dmg: 'dmgTick',   at: 0.28, count: 5, gap: 0.12, tag: '灼烧' },
-  saw:     { dmg: 'dmg',       at: 0.52, count: 1, gap: 0,    tag: '切割' },
+// 每个技能**不同**的受击表现（用户：所有技能受击效果都一样）。
+// 命中时刻不再用固定比例，改由技能实体自己上报 w.events（见 skill-lab-specs.mjs）。
+const HIT_STYLE = {
+  freeze:  { label: '冻结', color: '#8ce6ff', flash: '#b8ecff', status: '❄ 冻结', fx: 'ice' },
+  explode: { label: '爆炸', color: '#ff9a3c', flash: '#ffd8a0', status: '✹ 爆燃', fx: 'boom' },
+  shock:   { label: '感电', color: '#ffe14d', flash: '#f2eeff', status: '⚡ 麻痹', fx: 'volt' },
+  ram:     { label: '碾压', color: '#a8d08d', flash: '#e8f5d8', status: '▣ 击退', fx: 'ram' },
+  ray:     { label: '脉冲', color: '#3fe0d0', flash: '#d0fffa', status: '⌁ 灼烧', fx: 'ray' },
+  laser:   { label: '扫射', color: '#ffe14d', flash: '#fff6c0', status: '╱ 切割', fx: 'cut' },
+  turret:  { label: '炮击', color: '#cfe3ff', flash: '#ffffff', status: '● 弹击', fx: 'bullet' },
+  flame:   { label: '灼烧', color: '#ff7a3c', flash: '#ffb066', status: '♨ 灼烧', fx: 'fire' },
+  saw:     { label: '切割', color: '#cfd8e3', flash: '#ffffff', status: '✂ 切割', fx: 'cut' },
+  bullet:  { label: '命中', color: '#ffe08a', flash: '#fff0e0', status: '● 弹击', fx: 'bullet' },
+};
+// 伤害字段：从当前可调参数取，所以调伤害时飘字/血条跟着变
+const DMG_KEY = {
+  freeze: 'dmg', burn: 'dmg', shock: 'strikeDmg', vehicle: 'dmg', ray: 'dmg',
+  laser: 'dmg', turret: 'dmg', flame: 'dmgTick', saw: 'dmg',
 };
 
 class Stage {
@@ -205,55 +211,63 @@ class Stage {
     this.w = this.spec.blank ? this.spec.blank() : blankWorld();
     this.sprites = new FlameSprites();
     this.clock = 0; this.cycle = 0; this.wait = 0;
-    this.fired = new Set();
-    this.fx = { hp: 100, flash: 0, shake: 0, floaters: [], sparks: [], hits: 0, dmg: 0 };
-    // 武器实验室的命中由它自己的弹匣状态机回调
-    if (this.spec.blank) this.w.onHit = (dmg, tag) => this.onHit(dmg, tag);
+    this.fx = { hp: 100, flash: 0, shake: 0, flashColor: '#ffffff',
+      floaters: [], sparks: [], bursts: [], status: null, hits: 0, dmg: 0 };
     this.spec.make(this.w);
   }
-  onHit(dmg, tag) {
-    const d = Math.max(1, Math.round(dmg || 20));
-    const f = this.fx;
-    f.hp = Math.max(0, f.hp - d);
-    f.flash = 1; f.shake = 1; f.hits++; f.dmg += d;
-    f.floaters.push({ x: LAB.FOE.x + ((f.hits % 3) - 1) * 16, y: LAB.FOE.y - 26,
-      life: 900, maxLife: 900, text: `-${d}`, tag });
-    f.sparks.push({ x: LAB.FOE.x, y: LAB.FOE.y, life: 320, maxLife: 320, seed: f.hits });
-    if (f.floaters.length > 8) f.floaters.shift();
-    if (f.sparks.length > 8) f.sparks.shift();
+  /** 消费技能实体上报的命中事件：时间点由实体真实位置决定，类型决定受击表现 */
+  consumeEvents() {
+    const evs = this.w.events;
+    if (!evs || !evs.length) return;
+    const params = S[this.spec.id];
+    const key = DMG_KEY[this.spec.id];
+    for (const ev of evs) {
+      const st = HIT_STYLE[ev.kind] || HIT_STYLE.bullet;
+      const dmg = Math.max(1, Math.round(ev.dmg ?? (key ? params[key] : 20)));
+      const f = this.fx;
+      f.hp = Math.max(0, f.hp - dmg);
+      f.flash = 1; f.shake = ev.kind === 'ram' ? 1.6 : 1;
+      f.flashColor = st.flash; f.hits++; f.dmg += dmg;
+      f.status = { fx: st.fx, text: st.status, color: st.color, life: 1500, maxLife: 1500 };
+      f.floaters.push({ x: LAB.FOE.x + ((f.hits % 3) - 1) * 16, y: LAB.FOE.y - 26,
+        life: 900, maxLife: 900, text: `-${dmg}`, tag: st.label, color: st.color });
+      f.sparks.push({ x: LAB.FOE.x, y: LAB.FOE.y, life: 320, maxLife: 320,
+        seed: f.hits, color: st.color });
+      if (st.fx === 'boom') f.bursts.push({ x: LAB.FOE.x, y: LAB.FOE.y,
+        life: 520, maxLife: 520, seed: f.hits });
+      if (f.floaters.length > 8) f.floaters.shift();
+      if (f.sparks.length > 8) f.sparks.shift();
+      if (f.bursts.length > 4) f.bursts.shift();
+    }
+    evs.length = 0;
   }
   decay(dt) {
     const f = this.fx;
     f.flash = Math.max(0, f.flash - dt * 4);
     f.shake = Math.max(0, f.shake - dt * 5);
+    if (f.status) { f.status.life -= dt * 1000; if (f.status.life <= 0) f.status = null; }
     for (const x of f.floaters) x.life -= dt * 1000;
     for (const x of f.sparks) x.life -= dt * 1000;
+    for (const x of f.bursts) x.life -= dt * 1000;
     f.floaters = f.floaters.filter((x) => x.life > 0);
     f.sparks = f.sparks.filter((x) => x.life > 0);
+    f.bursts = f.bursts.filter((x) => x.life > 0);
   }
   step(dt) {
     this.clock += dt; this.cycle += dt;
     this.decay(dt);
     // 武器舞台有「弹匣→换弹→再开火」自己的状态机，不按技能演出时长 reset
-    if (this.spec.id === 'weapon') { this.spec.tick(this.w, dt, this.cycle); return; }
+    if (this.spec.id === 'weapon') {
+      this.spec.tick(this.w, dt, this.cycle);
+      this.consumeEvents();
+      return;
+    }
     if (this.wait > 0) {
       this.wait -= dt;
       if (this.wait <= 0) { this.wait = 0; this.reset(); }
       else return;                       // CD 中：停在演出末帧
     }
     const dur = durationOf(this.spec.id, GEOM);
-    // 按演出节奏触发受击反馈
-    const prof = HIT_PROFILE[this.spec.id];
-    if (prof) {
-      const params = S[this.spec.id];
-      for (let i = 0; i < prof.count; i++) {
-        const at = (prof.at + i * prof.gap) * dur;
-        if (this.cycle >= at && !this.fired.has(i)) {
-          this.fired.add(i);
-          this.onHit(params[prof.dmg] ?? 20, prof.tag);
-        }
-      }
-    }
     if (this.cycle >= dur) {
       this.cycle = dur;
       if (autoLoop) {
@@ -262,27 +276,94 @@ class Stage {
       }
     }
     this.spec.tick(this.w, dt, this.cycle);
+    this.consumeEvents();
   }
-  /** 敌人受击层：闪白 + 抖动 + 血条 + 命中火花 + 伤害飘字 + 底部统计 */
+  /** 敌人受击层：通用闪白/血条/飘字 + **按技能不同**的状态视觉 */
   drawHitFx(c) {
-    const f = this.fx, { FOE } = LAB;
-    const ex = FOE.x + (f.shake > 0 ? Math.sin(this.clock * 90) * 3 * f.shake : 0), ey = FOE.y;
+    const f = this.fx, { FOE } = LAB, st = f.status;
+    const sa = st ? Math.min(1, st.life / 400) : 0;
+    const shake = f.shake > 0 ? Math.sin(this.clock * 90) * 3 * f.shake : 0;
+    const knock = st && st.fx === 'ram' ? (1 - st.life / st.maxLife) * 14 : 0;
+    const ex = FOE.x + shake, ey = FOE.y + knock;
     c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
-    if (f.flash > 0) {
-      c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = f.flash * 0.65;
-      c.fillStyle = '#ffd9d0'; c.beginPath(); c.arc(ex, ey, 20, 0, Math.PI * 2); c.fill();
+
+    // ① 技能专属状态视觉
+    if (st && sa > 0) {
+      c.save();
+      if (st.fx === 'ice') {                       // 干冰弹：冰晶包裹 + 冰棱
+        c.globalCompositeOperation = 'lighter';
+        c.globalAlpha = sa * 0.45; c.fillStyle = '#2a9bd4';
+        c.beginPath(); c.arc(ex, ey, 20, 0, Math.PI * 2); c.fill();
+        c.globalAlpha = sa; c.strokeStyle = '#b8ecff'; c.lineWidth = 1.5;
+        for (const [dx, h] of [[-11, 16], [0, 25], [11, 14]]) {
+          c.beginPath(); c.moveTo(ex + dx - 3, ey + 10);
+          c.lineTo(ex + dx, ey + 10 - h); c.lineTo(ex + dx + 3, ey + 10); c.stroke();
+        }
+      } else if (st.fx === 'fire' || st.fx === 'boom') {   // 燃烧地带 / 温压弹：火苗
+        c.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 5; i++) {
+          const ph = (this.clock * 3 + i * 0.2) % 1;
+          const x = ex + (i - 2) * 7, y = ey + 18 - ph * 26;
+          c.globalAlpha = sa * (1 - ph) * 0.85;
+          c.fillStyle = i % 2 ? '#ff7a3c' : '#ffd257';
+          c.beginPath(); c.moveTo(x - 3, y + 6); c.lineTo(x, y - 7); c.lineTo(x + 3, y + 6); c.closePath(); c.fill();
+        }
+      } else if (st.fx === 'volt') {               // 电磁天雷：麻痹爬电
+        c.globalCompositeOperation = 'lighter'; c.strokeStyle = '#ffe14d'; c.lineWidth = 1.5;
+        for (let i = 0; i < 3; i++) {
+          const ph = (this.clock * 10 + i) % 1;
+          c.globalAlpha = sa * (1 - ph) * 0.9;
+          c.beginPath(); c.moveTo(ex - 18, ey + ph * 30 - 15); c.lineTo(ex - 6, ey + ph * 26 - 9);
+          c.lineTo(ex + 8, ey + ph * 22 - 13); c.lineTo(ex + 18, ey + ph * 20 - 6); c.stroke();
+        }
+      } else if (st.fx === 'ray') {                // 高能射线：青色脉冲环
+        c.globalCompositeOperation = 'lighter'; c.strokeStyle = '#3fe0d0'; c.lineWidth = 2;
+        c.globalAlpha = sa * 0.7;
+        c.beginPath(); c.arc(ex, ey, 18 + 10 * Math.sin(this.clock * 12), 0, Math.PI * 2); c.stroke();
+      } else if (st.fx === 'cut') {                // 制导激光 / 刀轮：横向切痕
+        c.globalCompositeOperation = 'lighter'; c.strokeStyle = st.color; c.lineWidth = 2.5;
+        c.globalAlpha = sa * 0.9;
+        c.beginPath(); c.moveTo(ex - 26, ey - 5); c.lineTo(ex + 26, ey + 5); c.stroke();
+      } else if (st.fx === 'ram') {                // 装甲车：压扁 + 击退位移
+        c.globalAlpha = sa; c.fillStyle = 'rgba(168,208,141,0.28)';
+        c.beginPath(); c.ellipse(ex, ey + 8, 22, 9, 0, 0, Math.PI * 2); c.fill();
+      }
       c.restore();
     }
+
+    // ② 温压弹爆炸：扩散冲击环 + 碎屑（弹体命中即消失，不再穿透）
+    for (const b of f.bursts) {
+      const k = 1 - b.life / b.maxLife, al = 1 - k;
+      const rr = 10 + k * S.burn.explodeR * 0.6;
+      c.save(); c.globalCompositeOperation = 'lighter';
+      c.globalAlpha = al * 0.8; c.strokeStyle = '#ffa64a'; c.lineWidth = 3 * al + 1;
+      c.beginPath(); c.ellipse(b.x, b.y, rr, rr * 0.34, 0, 0, Math.PI * 2); c.stroke();
+      c.globalAlpha = al;
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2 + b.seed, d = 6 + k * 36;
+        c.fillStyle = i % 2 ? '#ffd257' : '#ff7a3c';
+        c.fillRect(b.x + Math.cos(ang) * d, b.y + Math.sin(ang) * d * 0.6, 3, 3);
+      }
+      c.restore();
+    }
+
+    // ③ 受击闪白（颜色按技能）
+    if (f.flash > 0) {
+      c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = f.flash * 0.7;
+      c.fillStyle = f.flashColor; c.beginPath(); c.arc(ex, ey, 20, 0, Math.PI * 2); c.fill(); c.restore();
+    }
+    // ④ 血条
     const bw = 46;
     c.fillStyle = 'rgba(0,0,0,0.65)'; c.fillRect(ex - bw / 2, ey - 34, bw, 6);
     c.fillStyle = f.hp > 30 ? '#8fe08f' : '#ff8a7a';
     c.fillRect(ex - bw / 2, ey - 34, bw * (f.hp / 100), 6);
     c.strokeStyle = 'rgba(255,255,255,0.35)'; c.lineWidth = 1;
     c.strokeRect(ex - bw / 2, ey - 34, bw, 6);
+    // ⑤ 命中火花（颜色按技能）
     for (const s of f.sparks) {
       const k = 1 - s.life / s.maxLife, a = 1 - k;
       c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = a;
-      c.strokeStyle = '#ffe08a'; c.lineWidth = 2; c.beginPath();
+      c.strokeStyle = s.color; c.lineWidth = 2; c.beginPath();
       for (let i = 0; i < 7; i++) {
         const ang = (i / 7) * Math.PI * 2 + s.seed;
         const r0 = 6 + k * 14, r1 = r0 + 5;
@@ -291,22 +372,29 @@ class Stage {
       }
       c.stroke(); c.restore();
     }
+    // ⑥ 伤害飘字（标签 / 颜色按技能）
     c.globalCompositeOperation = 'source-over';
     for (const fl of f.floaters) {
       const k = 1 - fl.life / fl.maxLife, a = 1 - k, y = fl.y - k * 28;
       c.globalAlpha = a; c.textAlign = 'center';
       c.font = 'bold 14px monospace';
       c.fillStyle = '#0a1016'; c.fillText(fl.text, fl.x + 1, y + 1);
-      c.fillStyle = '#ffd257'; c.fillText(fl.text, fl.x, y);
-      c.font = '10px monospace'; c.fillStyle = '#8fa6b6';
+      c.fillStyle = fl.color; c.fillText(fl.text, fl.x, y);
+      c.font = '10px monospace'; c.fillStyle = fl.color;
       c.fillText(fl.tag, fl.x, y - 14);
     }
+    // ⑦ 状态名（冻结 / 麻痹 / 灼烧 …）
+    if (st && sa > 0) {
+      c.globalAlpha = sa; c.font = 'bold 11px monospace'; c.textAlign = 'center';
+      c.fillStyle = st.color; c.fillText(st.text, ex, ey + 38);
+    }
     c.globalAlpha = 1;
+    // ⑧ 底部统计
     c.fillStyle = 'rgba(8,12,24,0.82)'; c.fillRect(0, LAB.H - 22, LAB.W, 22);
     c.font = 'bold 11px monospace'; c.textAlign = 'left'; c.fillStyle = '#e7eefc';
     c.fillText(`目标 HP ${Math.round(f.hp)}/100`, 10, LAB.H - 8);
-    c.textAlign = 'right'; c.fillStyle = '#ffd257';
-    c.fillText(`命中 ${f.hits} · 累计 ${f.dmg}`, LAB.W - 10, LAB.H - 8);
+    c.textAlign = 'right'; c.fillStyle = st ? st.color : '#ffd257';
+    c.fillText(`${st ? st.label + ' · ' : ''}命中 ${f.hits} · 累计 ${f.dmg}`, LAB.W - 10, LAB.H - 8);
   }
   draw(dt) {
     const c = this.ctx;

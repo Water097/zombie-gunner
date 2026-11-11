@@ -370,17 +370,21 @@ export function drawArcs(ctx, world) {
   const p = new P(ctx); const C = EL.volt;
   for (const a of world.arcs) {
     const al = Math.max(0, a.life / a.maxLife);
-    // ⚠️ 2026-11-12：删掉白色内芯 arc(..., WHITE, ...) —— 截图红框里那根
-    //    「从落点往右下延伸的白色折线」就是它。现在整条电弧都是同色系紫色折线，
-    //    端点只留一个白色**闪点**（点，不是线）。
-    for (let i = 0; i < a.pts.length - 1; i++) {
-      const x0 = a.pts[i].x, y0 = a.pts[i].y, x1 = a.pts[i + 1].x, y1 = a.pts[i + 1].y;
-      boltGlow(p, x0, y0, x1, y1, C[3], 6, al * 0.28, i * 11 + 3, 8);
-      boltGlow(p, x0, y0, x1, y1, C[5], 2.5, al * 0.60, i * 7 + 1, 6);
+    // ⚠️ 2026-11-12：用户「只需要一个从天而降的天雷」，任何从落点往外延伸的
+    //    长折线都不要。弹射电弧改成**跳点火花**：每个节点只画 4 根 4~10px 的
+    //    短电弧 + 一个白闪点，彼此不连线（15 级节点卡仍有反馈，但不再是一根线）。
+    for (let i = 0; i < a.pts.length; i++) {
+      const { x, y } = a.pts[i];
+      p.glow(x, y, 10, C[4], 0.35 * al);
+      for (let j = 0; j < 4; j++) {
+        const ang = (j / 4) * TAU + i * 1.7;
+        const r0 = 3, r1 = 7 + 3 * Math.abs(Math.sin(i + j));
+        boltGlow(p, x + Math.cos(ang) * r0, y + Math.sin(ang) * r0,
+          x + Math.cos(ang) * r1, y + Math.sin(ang) * r1,
+          C[5], 1.5, 0.7 * al, i * 11 + j, 2);
+      }
+      p.dot(x, y, WHITE, al * 0.8);
     }
-    const last = a.pts[a.pts.length - 1];
-    p.glow(last.x, last.y, 8, C[5], al * 0.5);
-    p.dot(last.x, last.y, WHITE, al * 0.8);
   }
   p.reset();
 }

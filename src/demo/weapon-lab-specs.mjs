@@ -9,7 +9,7 @@ import { drawBullets, drawMuzzleFlash, drawHits } from './weapon-art.mjs';
 
 export function blankWeaponWorld() {
   return {
-    bullets: [], hits: [],
+    bullets: [], hits: [], events: [],
     mods: { bulletFire: false, bulletExplode: false },
     lab: { ammo: weaponParams.magSize, shotTimer: 0, reloadLeft: 0, muzzle: 0, shots: 0, hits: 0, dmg: 0 },
   };
@@ -65,7 +65,7 @@ export const WEAPON_SPEC = {
           w.hits.push({ x: b.x + (i - (n - 1) / 2) * 9, y: LAB.FOE.y + i * 5, life: 260, maxLife: 260 });
         }
         L.hits++; L.dmg += p.baseDamage * n;
-        if (w.onHit) w.onHit(p.baseDamage * n, '射击');   // 交给实验室的敌人受击层
+        w.events.push({ kind: 'bullet', dmg: p.baseDamage * n });   // 交给实验室的敌人受击层
         if (b.y > -30 && b.pierce > 0) { b.pierce--; b.hit = false; alive.push(b); }
         continue;
       }
