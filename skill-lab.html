@@ -48,15 +48,24 @@
   .layout{display:flex;gap:16px;align-items:flex-start}
   .stage-area{flex:1;min-width:0}
   .single{display:flex;justify-content:center;gap:16px;align-items:flex-start;flex-wrap:wrap}
-  #big,#weaponCv{width:min(340px,84vw);aspect-ratio:450/800;height:auto;display:block;background:#0c1018;
+  #big,#weaponCv{width:min(460px,88vw);aspect-ratio:450/800;height:auto;display:block;background:#0c1018;
     border:2px solid var(--line2);box-shadow:5px 5px 0 #050a0e}
   .side{max-width:300px;min-width:190px;font-size:12px;color:var(--dim)}
   .side h2{font-size:14px;color:var(--txt);margin:0 0 7px}
   .side ul{padding-left:18px;margin:0 0 12px}
   .side li{margin-bottom:4px}
   .detail{margin:4px 0 12px}
-  .detail canvas{width:170px;height:220px;display:block;background:#0c1018;
+  .detail canvas{width:220px;height:288px;display:block;background:#0c1018;
     border:2px solid var(--line2);box-shadow:3px 3px 0 #050a0e}
+  /* 放大舞台：单列、画布 720px、参数面板挪到下方（仍然可用） */
+  .layout.zoom{flex-direction:column}
+  .layout.zoom .stage-area{width:100%}
+  .layout.zoom .single,.layout.zoom .weapon{flex-direction:column;align-items:center}
+  .layout.zoom #big,.layout.zoom #weaponCv{width:min(720px,94vw)}
+  .layout.zoom .side{max-width:720px}
+  .layout.zoom .grid{grid-template-columns:repeat(3,minmax(210px,1fr))}
+  .layout.zoom .pp{position:static;width:100%;flex:1 1 100%;max-height:none}
+  .layout.zoom .detail canvas{width:260px;height:340px}
   .detail .cap{font-size:10.5px;color:var(--dim);margin-top:5px;display:block}
   .detail .cap b{color:var(--cy)}
   code{color:var(--cy);font-size:11px}
@@ -106,6 +115,7 @@
     <button id="togglePlay">⏸ 暂停</button>
     <button id="replay">↻ 重播</button>
     <button id="speed">速度 ×1</button>
+    <button id="zoomBtn">🔍 放大舞台</button>
     <label class="chk"><input type="checkbox" id="loop" checked>自动循环</label>
     <label class="chk"><input type="checkbox" id="cdLoop">冷却计入循环</label>
     <label class="chk"><input type="checkbox" id="axis" checked>目标方向轴</label>
@@ -119,14 +129,14 @@
 </header>
 
 <main>
-  <div class="layout">
+  <div class="layout" id="layout">
     <div class="stage-area">
       <div id="single" class="single">
         <canvas id="big" width="450" height="800"></canvas>
         <div class="side">
           <div id="detailWrap" class="detail hidden">
-            <canvas id="detailCv" width="170" height="220"></canvas>
-            <span class="cap">弹体特写 <b>×3.5</b> · 与实机同一份绘制代码</span>
+            <canvas id="detailCv" width="260" height="340"></canvas>
+            <span class="cap">弹体特写 <b>×5</b> · 与实机同一份绘制代码</span>
           </div>
           <h2>快捷键</h2>
           <ul>
@@ -174,6 +184,20 @@ let lab = 'skill', view = 'single', activeId = SPECS[0].id;
 let playing = true, speed = 1, autoLoop = true, useCooldown = false, showAxis = true;
 const cooldownOf = (id) => (S[id] && Number.isFinite(S[id].cooldownMs)) ? S[id].cooldownMs / 1000 : 0;
 
+// 命中时刻（占演出时长比例）与次数 —— 让实验室里看得见「敌人受击」。
+// 伤害值取当前可调参数，所以调伤害/持续时间时飘字与血条会跟着变。
+const HIT_PROFILE = {
+  freeze:  { dmg: 'dmg',       at: 0.58, count: 1, gap: 0,    tag: '冻结' },
+  burn:    { dmg: 'dmg',       at: 0.58, count: 1, gap: 0,    tag: '灼烧' },
+  shock:   { dmg: 'strikeDmg', at: 0.42, count: 1, gap: 0,    tag: '感电' },
+  vehicle: { dmg: 'dmg',       at: 0.42, count: 3, gap: 0.10, tag: '碾压' },
+  ray:     { dmg: 'dmg',       at: 0.30, count: 6, gap: 0.10, tag: '射线' },
+  laser:   { dmg: 'dmg',       at: 0.28, count: 5, gap: 0.10, tag: '扫射' },
+  turret:  { dmg: 'dmg',       at: 0.28, count: 3, gap: 0.18, tag: '炮击' },
+  flame:   { dmg: 'dmgTick',   at: 0.28, count: 5, gap: 0.12, tag: '灼烧' },
+  saw:     { dmg: 'dmg',       at: 0.52, count: 1, gap: 0,    tag: '切割' },
+};
+
 class Stage {
   constructor(canvas, spec) { this.cv = canvas; this.ctx = canvas.getContext('2d', { alpha: false }); this.setSpec(spec); }
   setSpec(spec) { this.spec = spec; this.reset(); }
@@ -181,12 +205,36 @@ class Stage {
     this.w = this.spec.blank ? this.spec.blank() : blankWorld();
     this.sprites = new FlameSprites();
     this.clock = 0; this.cycle = 0; this.wait = 0;
+    this.fired = new Set();
+    this.fx = { hp: 100, flash: 0, shake: 0, floaters: [], sparks: [], hits: 0, dmg: 0 };
+    // 武器实验室的命中由它自己的弹匣状态机回调
+    if (this.spec.blank) this.w.onHit = (dmg, tag) => this.onHit(dmg, tag);
     this.spec.make(this.w);
+  }
+  onHit(dmg, tag) {
+    const d = Math.max(1, Math.round(dmg || 20));
+    const f = this.fx;
+    f.hp = Math.max(0, f.hp - d);
+    f.flash = 1; f.shake = 1; f.hits++; f.dmg += d;
+    f.floaters.push({ x: LAB.FOE.x + ((f.hits % 3) - 1) * 16, y: LAB.FOE.y - 26,
+      life: 900, maxLife: 900, text: `-${d}`, tag });
+    f.sparks.push({ x: LAB.FOE.x, y: LAB.FOE.y, life: 320, maxLife: 320, seed: f.hits });
+    if (f.floaters.length > 8) f.floaters.shift();
+    if (f.sparks.length > 8) f.sparks.shift();
+  }
+  decay(dt) {
+    const f = this.fx;
+    f.flash = Math.max(0, f.flash - dt * 4);
+    f.shake = Math.max(0, f.shake - dt * 5);
+    for (const x of f.floaters) x.life -= dt * 1000;
+    for (const x of f.sparks) x.life -= dt * 1000;
+    f.floaters = f.floaters.filter((x) => x.life > 0);
+    f.sparks = f.sparks.filter((x) => x.life > 0);
   }
   step(dt) {
     this.clock += dt; this.cycle += dt;
-    // 武器舞台有「弹匣→换弹→再开火」自己的状态机，不按技能演出时长 reset，
-    // 否则累计命中/伤害会被周期性清零。
+    this.decay(dt);
+    // 武器舞台有「弹匣→换弹→再开火」自己的状态机，不按技能演出时长 reset
     if (this.spec.id === 'weapon') { this.spec.tick(this.w, dt, this.cycle); return; }
     if (this.wait > 0) {
       this.wait -= dt;
@@ -194,6 +242,18 @@ class Stage {
       else return;                       // CD 中：停在演出末帧
     }
     const dur = durationOf(this.spec.id, GEOM);
+    // 按演出节奏触发受击反馈
+    const prof = HIT_PROFILE[this.spec.id];
+    if (prof) {
+      const params = S[this.spec.id];
+      for (let i = 0; i < prof.count; i++) {
+        const at = (prof.at + i * prof.gap) * dur;
+        if (this.cycle >= at && !this.fired.has(i)) {
+          this.fired.add(i);
+          this.onHit(params[prof.dmg] ?? 20, prof.tag);
+        }
+      }
+    }
     if (this.cycle >= dur) {
       this.cycle = dur;
       if (autoLoop) {
@@ -203,11 +263,57 @@ class Stage {
     }
     this.spec.tick(this.w, dt, this.cycle);
   }
+  /** 敌人受击层：闪白 + 抖动 + 血条 + 命中火花 + 伤害飘字 + 底部统计 */
+  drawHitFx(c) {
+    const f = this.fx, { FOE } = LAB;
+    const ex = FOE.x + (f.shake > 0 ? Math.sin(this.clock * 90) * 3 * f.shake : 0), ey = FOE.y;
+    c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1;
+    if (f.flash > 0) {
+      c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = f.flash * 0.65;
+      c.fillStyle = '#ffd9d0'; c.beginPath(); c.arc(ex, ey, 20, 0, Math.PI * 2); c.fill();
+      c.restore();
+    }
+    const bw = 46;
+    c.fillStyle = 'rgba(0,0,0,0.65)'; c.fillRect(ex - bw / 2, ey - 34, bw, 6);
+    c.fillStyle = f.hp > 30 ? '#8fe08f' : '#ff8a7a';
+    c.fillRect(ex - bw / 2, ey - 34, bw * (f.hp / 100), 6);
+    c.strokeStyle = 'rgba(255,255,255,0.35)'; c.lineWidth = 1;
+    c.strokeRect(ex - bw / 2, ey - 34, bw, 6);
+    for (const s of f.sparks) {
+      const k = 1 - s.life / s.maxLife, a = 1 - k;
+      c.save(); c.globalCompositeOperation = 'lighter'; c.globalAlpha = a;
+      c.strokeStyle = '#ffe08a'; c.lineWidth = 2; c.beginPath();
+      for (let i = 0; i < 7; i++) {
+        const ang = (i / 7) * Math.PI * 2 + s.seed;
+        const r0 = 6 + k * 14, r1 = r0 + 5;
+        c.moveTo(s.x + Math.cos(ang) * r0, s.y + Math.sin(ang) * r0);
+        c.lineTo(s.x + Math.cos(ang) * r1, s.y + Math.sin(ang) * r1);
+      }
+      c.stroke(); c.restore();
+    }
+    c.globalCompositeOperation = 'source-over';
+    for (const fl of f.floaters) {
+      const k = 1 - fl.life / fl.maxLife, a = 1 - k, y = fl.y - k * 28;
+      c.globalAlpha = a; c.textAlign = 'center';
+      c.font = 'bold 14px monospace';
+      c.fillStyle = '#0a1016'; c.fillText(fl.text, fl.x + 1, y + 1);
+      c.fillStyle = '#ffd257'; c.fillText(fl.text, fl.x, y);
+      c.font = '10px monospace'; c.fillStyle = '#8fa6b6';
+      c.fillText(fl.tag, fl.x, y - 14);
+    }
+    c.globalAlpha = 1;
+    c.fillStyle = 'rgba(8,12,24,0.82)'; c.fillRect(0, LAB.H - 22, LAB.W, 22);
+    c.font = 'bold 11px monospace'; c.textAlign = 'left'; c.fillStyle = '#e7eefc';
+    c.fillText(`目标 HP ${Math.round(f.hp)}/100`, 10, LAB.H - 8);
+    c.textAlign = 'right'; c.fillStyle = '#ffd257';
+    c.fillText(`命中 ${f.hits} · 累计 ${f.dmg}`, LAB.W - 10, LAB.H - 8);
+  }
   draw(dt) {
     const c = this.ctx;
     c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.setLineDash([]);
     drawBackdrop(c, { axis: showAxis });
     this.spec.draw(c, this.w, this.clock, dt, this.sprites);
+    this.drawHitFx(c);
     c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
     const dur = durationOf(this.spec.id, GEOM);
     c.fillStyle = 'rgba(8,12,24,0.74)'; c.fillRect(0, 0, LAB.W, 26);
@@ -217,7 +323,6 @@ class Stage {
     const clock = this.spec.id === 'weapon' ? `${this.cycle.toFixed(1)}s`
       : this.wait > 0 ? `冷却 ${this.wait.toFixed(1)}s` : `${this.cycle.toFixed(1)} / ${dur.toFixed(1)}s`;
     c.fillText(clock, LAB.W - 10, 18);
-    // 冷却进度条
     if (this.wait > 0 && useCooldown) {
       const cd = Math.max(0.001, cooldownOf(this.spec.id));
       const k = Math.max(0, Math.min(1, 1 - this.wait / cd));
@@ -227,15 +332,15 @@ class Stage {
   }
 }
 
-// ── 弹体特写（干冰 / 温压弹只有 ~25px，放大 3.5 倍看造型）──
+// ── 弹体特写（干冰 / 温压弹只有 ~25px，放大 5 倍看造型）──
 const detailWrap = $('detailWrap'), detailCv = $('detailCv');
-detailCv.width = 170; detailCv.height = 220;
+detailCv.width = 260; detailCv.height = 340;
 const dctx = detailCv.getContext('2d', { alpha: false });
 function drawDetail() {
   const show = lab === 'skill' && view === 'single' && (activeId === 'freeze' || activeId === 'burn');
   detailWrap.classList.toggle('hidden', !show);
   if (!show) return;
-  const W = 170, H = 220;
+  const W = 260, H = 340;
   dctx.globalAlpha = 1; dctx.globalCompositeOperation = 'source-over';
   dctx.fillStyle = '#0c1018'; dctx.fillRect(0, 0, W, H);
   dctx.strokeStyle = 'rgba(255,210,87,0.35)'; dctx.setLineDash([4, 6]); dctx.lineWidth = 1;
@@ -246,7 +351,7 @@ function drawDetail() {
   // 假 world：弹体在原点、朝上；直接调实机同一份 drawSkillShots，没有第二套画法
   const fake = { skillShots: [{ id: activeId, x: 0, y: 0, vx: 0, vy: -1,
     radius: activeId === 'freeze' ? 6 : 7, color: '#ffffff' }] };
-  dctx.save(); dctx.translate(W / 2, 78); dctx.scale(3.5, 3.5);
+  dctx.save(); dctx.translate(W / 2, 120); dctx.scale(5, 5);
   drawSkillShots(dctx, fake, performance.now() / 1000);
   dctx.restore();
   dctx.globalAlpha = 1; dctx.globalCompositeOperation = 'source-over';
@@ -429,6 +534,12 @@ $('replay').onclick = replay;
 $('speed').onclick = () => {
   speed = speed === 1 ? 0.5 : speed === 0.5 ? 2 : 1;
   $('speed').textContent = `速度 ×${speed}`;
+};
+const zoomBtn = $('zoomBtn'), layoutEl = $('layout');
+zoomBtn.onclick = () => {
+  const on = layoutEl.classList.toggle('zoom');
+  zoomBtn.classList.toggle('on', on);
+  zoomBtn.textContent = on ? '🔍 还原尺寸' : '🔍 放大舞台';
 };
 $('loop').onchange = (e) => { autoLoop = e.target.checked; };
 $('cdLoop').onchange = (e) => { useCooldown = e.target.checked; };

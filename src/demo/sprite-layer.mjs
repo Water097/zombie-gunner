@@ -105,17 +105,8 @@ export class EnemySprites {
     ctx.imageSmoothingEnabled = false;
     ctx.drawImage(c, dx, dy, FW * s, FH * s);
 
-    if (e.hitFlash > 0) {
-      const a = Math.min(1, e.hitFlash / 160);
-      ctx.save();
-      ctx.globalAlpha = 0.55 * a;
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.ellipse(e.x, e.y - 10 * s * 0.7, 15 * s * 0.9, 13 * s * 0.8, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
+    // 受击闪白统一由 main.mjs 的 drawEnemies() 画（覆盖精灵与几何占位两条路径），
+    // 这里不再叠一层几乎看不见的细描边。
     return true;
   }
 

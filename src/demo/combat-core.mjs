@@ -533,7 +533,7 @@ function dealDamage(world, enemy, raw, source = 'weapon') {
   // 技能伤害通用倍率（配置工作台）：主武器子弹(fire/weapon 来源)不受影响，各自有独立滑块
   if (source && source !== 'weapon' && source !== 'fire') dmg *= tuning.skills.dmgMul;
   enemy.hp -= dmg;
-  enemy.hitFlash = 90;
+  enemy.hitFlash = 170;   // 受击闪白时长：原 90ms 只有 ~5 帧，肉眼几乎看不到
   if (gate > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×3  ${Math.round(dmg)}`, '#ff4d4d');
   else if (cond.tag) addFloater(world, enemy.x, enemy.y - enemy.radius, `${cond.tag} ${Math.round(dmg)}`, cond.color);
   else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' || source === 'fire' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : source === 'vehicle' ? '#a8d08d' : source === 'freeze' ? '#8ce6ff' : '#ffffff');

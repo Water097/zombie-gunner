@@ -65,6 +65,7 @@ export const WEAPON_SPEC = {
           w.hits.push({ x: b.x + (i - (n - 1) / 2) * 9, y: LAB.FOE.y + i * 5, life: 260, maxLife: 260 });
         }
         L.hits++; L.dmg += p.baseDamage * n;
+        if (w.onHit) w.onHit(p.baseDamage * n, '射击');   // 交给实验室的敌人受击层
         if (b.y > -30 && b.pierce > 0) { b.pierce--; b.hit = false; alive.push(b); }
         continue;
       }

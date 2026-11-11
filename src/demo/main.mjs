@@ -719,6 +719,20 @@ function drawEnemies() {
     // 传世界时钟（秒）作为动画取帧基准：所有同类型史莱姆按各自周期播放烘焙序列，帧率无关
     const showSprite = tuning.fx.enemyGlow && enemySprites.draw(ctx, e, world.time / 1000);
     if (!showSprite) drawEnemyBody(e, x, y, r);
+    // 受击闪白：加色填充 + 白环，两条渲染路径都覆盖。原来只在 sprite-layer 里
+    // 画一圈 2px / 0.31 透明度的描边、且只有 90ms，用户反馈「看不到受击效果」。
+    if (e.hitFlash > 0) {
+      const a = Math.min(1, e.hitFlash / 140);
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 0.72 * a;
+      ctx.fillStyle = '#fff0e0';
+      ctx.beginPath(); ctx.arc(x, y, R * 0.94, 0, Math.PI * 2); ctx.fill();
+      ctx.globalAlpha = 0.9 * a;
+      ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(x, y, R + 2, 0, Math.PI * 2); ctx.stroke();
+      ctx.restore();
+    }
     const stCol = has(e.st, 'freeze') ? '#5ad1ff' : has(e.st, 'stun') ? '#c77dff' : has(e.st, 'burn') ? '#ff7a3c' : null;
     if (stCol) {
       ctx.globalAlpha = 0.22; ctx.fillStyle = stCol;
