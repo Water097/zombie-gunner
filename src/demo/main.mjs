@@ -690,7 +690,8 @@ function drawEnemies() {
       ctx.beginPath(); ctx.arc(x, y, R + 4, 0, Math.PI * 2); ctx.stroke();
     }
     // 史莱姆精灵（概念图直接跑）；渲染失败才退回几何占位
-    if (!enemySprites.draw(ctx, e, lastDt / 1000)) drawEnemyBody(e, x, y, r);
+    // 传世界时钟（秒）作为动画取帧基准：所有同类型史莱姆按各自周期播放烘焙序列，帧率无关
+    if (!enemySprites.draw(ctx, e, world.time / 1000)) drawEnemyBody(e, x, y, r);
     const stCol = has(e.st, 'freeze') ? '#5ad1ff' : has(e.st, 'stun') ? '#c77dff' : has(e.st, 'burn') ? '#ff7a3c' : null;
     if (stCol) {
       ctx.globalAlpha = 0.22; ctx.fillStyle = stCol;
