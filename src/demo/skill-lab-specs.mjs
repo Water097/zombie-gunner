@@ -154,7 +154,7 @@ export const SPECS = [
   },
   {
     id: 'turret', name: '哨戒机', tag: '物理系 · 实体（定点）', color: S.turret.color,
-    read: '三脚架 + 转塔锁敌 + 连点射 + 命中火花。「兜底」这件事要看得见。',
+    read: '浮空哨戒无人机（形态 B · 已定稿）：环形主体 + 中央独眼 + 两侧能量翼 + 底部推进光；枪口始终对准目标，开火时独眼充能并射出青白能量束。',
     dur: 3.0,
     make(w) {
       const sk = S.turret, x = LAB.PET.x - 95, y = LAB.PET.y - 160;

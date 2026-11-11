@@ -4,7 +4,7 @@
 // 所有形态的枪口都画在局部 -y，配合 rotate(aim + π/2) 精确指向目标，不做时间摆动。
 // fire = 0..1 射击相位（0~0.3 为开火瞬间），只用来做后坐 / 枪口焰 / 充能，不改变朝向。
 
-import { P } from './skill-art.mjs';
+import { P, drawDroneBase, drawDroneHead } from './skill-art.mjs';
 
 const ST = ['#0e1318', '#1a222b', '#2b3644', '#41505f', '#5d6e80', '#8b9aa8', '#c6cfd9'];
 const CY = ['#04161c', '#08303c', '#0d5566', '#158a9e', '#35c2d4', '#8ee8f2', '#e0feff'];
@@ -48,31 +48,8 @@ function aHead(p, t, fire) {
   }
 }
 
-// ── B · 浮空哨戒无人机（科幻）──────────────────────────────
-function bBase(p, t) {
-  const bob = Math.round(Math.sin(t * 3) * 2);
-  p.ellipse(0, 37, 16, 4, INK, 0.28);
-  p.glow(0, 22, 16, CY[4], 0.16 + 0.06 * Math.sin(t * 5));
-  for (const s of [-1, 1]) {
-    p.poly([[s * 10, -6 + bob], [s * 27, -13 + bob], [s * 31, -5 + bob], [s * 12, 2 + bob]], CY[3], 1);
-    p.poly([[s * 12, -5 + bob], [s * 27, -12 + bob], [s * 27, -10 + bob], [s * 12, -3 + bob]], CY[5], 1);
-    p.glowLine(s * 14, -6 + bob, s * 28, -11 + bob, 2, CY[6], 0.45);
-  }
-}
-function bHead(p, t, fire) {
-  const ch = fire > 0 && fire < 0.3 ? 1 - fire / 0.3 : 0.3 + 0.2 * Math.sin(t * 4);
-  p.ellipse(0, -6, 13, 12, CY[2], 1);
-  p.ellipse(0, -6, 10, 9, CY[4], 1);
-  p.ellipse(0, -6, 7, 6, CY[1], 1);
-  p.ellipse(0, -6, 4, 4, WHITE, 0.4 + 0.6 * ch);
-  p.glow(0, -6, 10 + 4 * ch, CY[6], 0.25 + 0.4 * ch);
-  p.rect(-3, -20, 6, 5, CY[3], 1); p.rect(-2, -21, 4, 2, CY[5], 1);
-  if (fire > 0 && fire < 0.2) {
-    const a = 1 - fire / 0.2;
-    p.beam(0, -20, 0, -54, 3, CY[6], a * 0.8);
-    p.glow(0, -20, 8, WHITE, 0.5 * a);
-  }
-}
+// ── B · 浮空哨戒无人机（科幻）── 用户已选定，实现已定稿到 skill-art.mjs ──
+// 这里直接复用导出的 drawDroneBase / drawDroneHead，不再复制一份画法。
 
 // ── C · 棱镜激光塔（能量）──────────────────────────────────
 function cBase(p, t) {
@@ -147,7 +124,7 @@ export const CANDIDATES = [
     id: 'B', name: '浮空哨戒无人机', style: '科幻 · 最轻最灵',
     read: '环形悬浮主体 + 中央独眼 + 两侧能量翼 + 底部推进光；开火时独眼充能并射出细光束。',
     pros: ['和「地面炮台」彻底拉开差异', '独眼 = 锁敌读得最清楚', '浮空 + 呼吸光最有高级感'],
-    base: bBase, head: bHead,
+    base: drawDroneBase, head: drawDroneHead,
   },
   {
     id: 'C', name: '棱镜激光塔', style: '能量 · 最抢眼',

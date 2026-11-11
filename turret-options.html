@@ -51,8 +51,8 @@
 <header>
   <h1>哨戒机形态候选 · <b>4 选 1</b></h1>
   <p class="lead">现状是「三脚架 + 圆球炮塔 + 随时间左右摆的炮管」——形态弱、枪口还乱晃。下面 4 个方案都<b>把枪口固定对准正上方的目标</b>（黄色虚线），只保留开火后坐 / 枪口焰 / 充能这类「沿枪管方向」的动作，不再摆来摆去。</p>
-  <div class="note"><b>全部是实时运行的概念代码，不是截图。</b> 每张卡循环播放 ~0.9s 一轮的开火节奏。选好后我把那一套落到 <code>skill-art.mjs</code> 的 <code>drawTurrets()</code>，Demo 实机与技能实验室会同步更新（同一份代码，没有第二套画法）。</div>
-  <div class="chosen" id="chosen">尚未选择 · 点任意卡片的「选这个」，或直接回复 A / B / C / D</div>
+  <div class="note"><b>全部是实时运行的概念代码，不是截图。</b> 每张卡循环播放 ~0.9s 一轮的开火节奏。✅ <b>2026-11-12 已选 B 并落地实机</b>：B 的两层绘制函数已定稿到 <code>skill-art.mjs</code>（<code>drawDroneBase</code> / <code>drawDroneHead</code>），本页 B 与 Demo 实机、技能实验室<b>共用同一份代码</b>；其余三张保留作对照。</div>
+  <div class="chosen" id="chosen">已选 B · 浮空哨戒无人机（定稿，已落地实机与实验室）</div>
 </header>
 
 <main>
@@ -67,7 +67,7 @@
 <footer>
   <h2>怎么选</h2>
   <p>看三件事：① <b>剪影</b>一眼能不能认出是「会自动打的炮台」；② <b>开火反馈</b>是否比现状清楚；③ 和场上其它技能（装甲车 / 光束 / 火区）<b>会不会撞型</b>。</p>
-  <p>四个方案都共用同一套 <code>P</code> 像素画笔与色阶纪律（硬形体 a=1、半透明只用 disc、光走加色）。选定后我会按你选的形态重做 <code>drawTurrets()</code>，并保留「枪口对准目标」这条修复。</p>
+  <p>四个方案都共用同一套 <code>P</code> 像素画笔与色阶纪律（硬形体 a=1、半透明只用 disc、光走加色）。<b>B 已落地</b>：<code>drawTurrets()</code> 现调 <code>drawDroneBase/drawDroneHead</code>，按 <code>rotate(aim + π/2)</code> 让局部 -y 精确指向目标，只保留浮动 / 独眼充能 / 能量束这类动作，不再摆来摆去。</p>
 </footer>
 
 <script type="module">
@@ -77,8 +77,8 @@ const KEY = 'zombie-gunner.turret-choice';
 const grid = document.getElementById('grid');
 const chosenEl = document.getElementById('chosen');
 const cards = [];
-let picked = null;
-try { picked = localStorage.getItem(KEY); } catch { /* 隐私模式忽略 */ }
+let picked = 'B';   // 2026-11-12 用户拍板的定稿方案
+try { const saved = localStorage.getItem(KEY); if (saved && CANDIDATES.some((c) => c.id === saved)) picked = saved; } catch { /* 隐私模式忽略 */ }
 
 for (const cand of CANDIDATES) {
   const el = document.createElement('article');
@@ -106,10 +106,11 @@ function choose(id) {
     c.btn.textContent = on ? `✓ 已选 ${c.cand.id}` : `选这个（${c.cand.id}）`;
   }
   const c = cards.find((x) => x.cand.id === id);
-  chosenEl.textContent = `已选 ${id} · ${c.cand.name} —— 回复「${id}」给我确认，我就把这套形态落到实机与实验室。`;
+  chosenEl.textContent = id === 'B'
+    ? `已选 B · ${c.cand.name} —— ✅ 这套已落地实机与实验室（当前生效）。若想改选其它形态，回复对应字母。`
+    : `已选 ${id} · ${c.cand.name} —— 这是对照候选，尚未落地；回复「${id}」确认后我再替换实机形态。`;
 }
-if (picked && CANDIDATES.some((c) => c.id === picked)) choose(picked);
-else chosenEl.textContent = '尚未选择 · 点任意卡片的「选这个」，或直接回复 A / B / C / D';
+choose(picked);
 
 let t = 0, last = performance.now(), playing = true;
 const playBtn = document.getElementById('play');

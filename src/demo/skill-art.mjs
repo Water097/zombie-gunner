@@ -384,49 +384,81 @@ export function drawSweeps(ctx, world) {
 // 7 · 哨戒机：底座炮塔 + 转塔锁敌 + 连点射（按 world.turrets + turretShots）
 // 枪口方向由「当前射击目标」决定（turretShots 的 tx/ty，或最近敌人），
 // 不再用全局 time 左右摆 —— 用户反馈「摆来摆去」的根因。
-function turretAim(world, t) {
+// 形态 B「浮空哨戒无人机」（2026-11-12 用户从 4 个候选中选定）。
+// 这两层是**唯一实现**：drawTurrets() 与候选页 turret-options.html 都调它，不存在第二套画法。
+// base = 不随枪口旋转（地面影 / 推进光 / 能量翼）；head = 随 aim 旋转（环体 / 独眼 / 炮口 / 光束）。
+export function drawDroneBase(p, t, a = 1) {
+  const C = EL.cyan;
+  const bob = Math.round(Math.sin(t * 3) * 2);
+  p.ellipse(0, 37, 16, 4, INK, 0.28 * a);
+  p.glow(0, 22, 16, C[4], (0.16 + 0.06 * Math.sin(t * 5)) * a);
+  for (const s of [-1, 1]) {
+    p.poly([[s * 10, -6 + bob], [s * 27, -13 + bob], [s * 31, -5 + bob], [s * 12, 2 + bob]], C[3], a);
+    p.poly([[s * 12, -5 + bob], [s * 27, -12 + bob], [s * 27, -10 + bob], [s * 12, -3 + bob]], C[5], a);
+    p.glowLine(s * 14, -6 + bob, s * 28, -11 + bob, 2, C[6], 0.45 * a);
+  }
+}
+export function drawDroneHead(p, t, fire, a = 1) {
+  const C = EL.cyan;
+  const ch = fire > 0 && fire < 0.3 ? 1 - fire / 0.3 : 0.3 + 0.2 * Math.sin(t * 4);
+  p.ellipse(0, -6, 13, 12, C[2], a);
+  p.ellipse(0, -6, 10, 9, C[4], a);
+  p.ellipse(0, -6, 7, 6, C[1], a);
+  p.ellipse(0, -6, 4, 4, WHITE, (0.4 + 0.6 * ch) * a);
+  p.glow(0, -6, 10 + 4 * ch, C[6], (0.25 + 0.4 * ch) * a);
+  p.rect(-3, -20, 6, 5, C[3], a);
+  p.rect(-2, -21, 4, 2, C[5], a);
+  if (fire > 0 && fire < 0.2) {
+    const k = 1 - fire / 0.2;
+    p.beam(0, -20, 0, -54, 3, C[6], k * 0.8 * a);
+    p.glow(0, -20, 8, WHITE, 0.5 * k * a);
+  }
+}
+
+/** 枪口目标 + 开火相位。优先 turretShots，其次最近敌人；无目标朝上待机。 */
+function turretTarget(world, t) {
   const my = t.y - 14;                         // 炮塔轴心
   let best = null, bd = Infinity;
   for (const sh of world.turretShots || []) {
     const d = Math.hypot(sh.x - t.x, sh.y - t.y);
     if (d < bd) { bd = d; best = sh; }
   }
-  if (best && bd < 90 && Number.isFinite(best.tx)) return Math.atan2(best.ty - my, best.tx - t.x);
+  if (best && bd < 90 && Number.isFinite(best.tx)) {
+    // 把 shot.life(120→0) 映射成候选形态的 fire(0→0.3) 演出进度
+    const fire = 0.02 + 0.28 * (1 - Math.max(0, Math.min(1, best.life / 120)));
+    return { aim: Math.atan2(best.ty - my, best.tx - t.x), fire };
+  }
   let foe = null, fd = Infinity;
   for (const e of world.enemies || []) {
     if (!e.alive) continue;
     const d = Math.hypot(e.x - t.x, e.y - my);
     if (d < fd) { fd = d; foe = e; }
   }
-  return foe ? Math.atan2(foe.y - my, foe.x - t.x) : -Math.PI / 2;
+  return { aim: foe ? Math.atan2(foe.y - my, foe.x - t.x) : -Math.PI / 2, fire: 0 };
 }
 
 export function drawTurrets(ctx, world, time) {
-  const p = new P(ctx); const C = EL.steel;
+  const p = new P(ctx); const C = EL.cyan;
+  // 弹道：青白能量束 + 命中火花（与无人机独眼/光束同一套语言）
   for (const sh of world.turretShots) {
     const a = Math.max(0, sh.life / 120);
     const ang = Math.atan2(sh.ty - sh.y, sh.tx - sh.x);
-    const sx = sh.x + Math.cos(ang) * 16, sy = sh.y + Math.sin(ang) * 16;   // 弹道从枪口出
-    p.glowLine(sx, sy, sh.tx, sh.ty, 2, '#cfe3ff', a * 0.9);
-    if (a > 0.5) { p.disc(sh.tx, sh.ty, 4, WHITE, (a - 0.5) * 2); p.glow(sh.tx, sh.ty, 10, '#cfe3ff', 0.6 * (a - 0.5) * 2); }
+    const sx = sh.x + Math.cos(ang) * 16, sy = sh.y + Math.sin(ang) * 16;
+    p.beam(sx, sy, sh.tx, sh.ty, 3, C[5], a * 0.7);
+    p.beam(sx, sy, sh.tx, sh.ty, 1, WHITE, a * 0.9);
+    p.disc(sh.tx, sh.ty, 4, WHITE, a * 0.9);
+    p.glow(sh.tx, sh.ty, 10, C[6], 0.6 * a);
   }
   for (const t of world.turrets) {
     const a = Math.min(1, t.life / 800);
-    const aim = turretAim(world, t);
-    p.ellipse(t.x, t.y + 2, 14 * (t.r / 18), 5 * (t.r / 18), INK, 0.4 * a);
-    p.line(t.x - 2, t.y - 4, t.x - 11, t.y + 2, C[2], a);
-    p.line(t.x + 2, t.y - 4, t.x + 11, t.y + 2, C[2], a);
-    p.line(t.x, t.y - 4, t.x, t.y + 2, C[2], a);
-    p.rect(t.x - 9, t.y - 10, 18, 7, C[3], a);
-    p.rect(t.x - 9, t.y - 10, 18, 2, C[5], a);
-    p.ellipse(t.x, t.y - 14, 9 * (t.r / 18), 8 * (t.r / 18), C[4], a);
-    p.ellipse(t.x - 2, t.y - 16, 5 * (t.r / 18), 4 * (t.r / 18), C[5], a);
-    const bx = Math.cos(aim), by = Math.sin(aim);
-    for (const off of [-2.5, 2.5]) {
-      p.line(t.x + off * 0.5, t.y - 14, t.x + bx * 16 + off * 0.5, t.y - 14 + by * 16, C[2], a);
-      p.line(t.x + off * 0.5, t.y - 15, t.x + bx * 16 + off * 0.5, t.y - 15 + by * 16, C[5], a);
-    }
-    p.dot(t.x, t.y - 14, Math.sin(time * 12) > 0 ? COL.redLight : C[6], a);
+    const { aim, fire } = turretTarget(world, t);
+    const sc = Math.max(0.6, Math.min(2, (t.r || 12) / 12));
+    // 局部原点 = 炮塔轴心；head 用 rotate(aim + π/2) 把局部 -y 精确指向目标
+    ctx.save(); ctx.translate(t.x, t.y - 14); ctx.scale(sc, sc);
+    drawDroneBase(p, time, a);
+    ctx.save(); ctx.rotate(aim + Math.PI / 2);
+    drawDroneHead(p, time, fire, a);
+    ctx.restore(); ctx.restore();
   }
   p.reset();
 }
