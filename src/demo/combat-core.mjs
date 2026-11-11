@@ -17,6 +17,8 @@ import {
   vehicleRammedMultiplier, getKnockDistance, applyKnockToPosition,
 } from '../status/status-system.mjs';
 import { CARDS, MERCY_CARD, rollCards, MAX_LEVEL, xpForLevel } from './cards.mjs';
+// 配置工作台参数中心：所有可调项从 tuning 实时读取（默认 = 旧硬编码值，不改行为）
+import { tuning } from './tuning.mjs';
 
 // ── 世界尺寸（逻辑像素，竖屏）──
 export const WORLD = { W: 450, H: 800 };
@@ -109,9 +111,9 @@ export const WAVE_SCRIPT = [
 ];
 
 // 整体密度微调旋钮（不影响峰谷相对形状，只把所有波的间隔等比例缩放）：
-// 1.0 = 剧本原值；>1 降低整体密度（拉回可玩基线）。当前 1.2：装甲车等守线技能实装后机制已 drift，
+// 1.0 = 剧本原值；>1 降低整体密度（拉回可玩基线）。原硬编码 1.2：装甲车等守线技能实装后机制已 drift，
 // 16 册基线（smart 87%/random 77%）是旧代码测的，现版需整体降一档才能回到可玩区间。
-const SPAWN_INTERVAL_TUNE = 1.2;
+// 现已移交配置工作台（tuning.enemy.spawnIntervalTune，默认 1.2），可在面板实时调。
 
 // ── 三技能（9 技能里的代表：冰弹穿透 / 温压爆炸 / 电磁天雷）──
 // 对齐 02 册：每个技能是"独立攻击体系"，不是要塞静态光环。
@@ -336,7 +338,7 @@ export function createWorld() {
     gameOver: false,
     player: {
       x: PLAYER.x, y: PLAYER.y, angle: -Math.PI / 2,
-      ammo: PLAYER.magSize, reloading: false, reloadTimer: 0,
+      ammo: tuning.player.magSize, reloading: false, reloadTimer: 0,
       fireTimer: 0, targetId: null,
     },
     enemies: [],
@@ -414,9 +416,9 @@ function flameEllipse(f) {
   return { rx, ry: rx * FLAME_SQUASH };
 }
 
-// 弹匣容量固定 30（用户决定：不随卡变化）
+// 弹匣容量（用户决定：不随卡变化；可由配置工作台调整）
 export function magSizeOf() {
-  return PLAYER.magSize;
+  return tuning.player.magSize;
 }
 
 // 移动倍率：冻结/眩晕直接 0；减速/感电按幅度叠加，封顶 90%
@@ -450,9 +452,9 @@ function waveScales(world) {
   // 游戏直接从"偶尔翻车"变"地狱"。这里把单体血量/攻击同比例下调（**更多但更软**），
   // 保留尸群的密集观感与压迫感，但总压力只微增。
   const DENSITY_COMP = 0.74;
-  const hpScale = (1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45) * DENSITY_COMP;  // 第20波 ≈ 2.0×
-  const spdScale = Math.min(1.5, 1 + (wv - 1) * 0.025);
-  const atkScale = (1 + (wv - 1) * 0.06) * DENSITY_COMP;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
+  const hpScale = (1 + (wv - 1) * 0.03 + Math.pow((wv - 1) / 19, 2) * 0.45) * DENSITY_COMP * tuning.enemy.hpScaleMul;  // 第20波 ≈ 2.0×
+  const spdScale = Math.min(1.5, 1 + (wv - 1) * 0.025) * tuning.enemy.spdScaleMul;
+  const atkScale = (1 + (wv - 1) * 0.06) * DENSITY_COMP * tuning.enemy.atkScaleMul;   // 攻城伤害随波次抬升：漏怪就要持续付出要塞血量代价
   return { hpScale, spdScale, atkScale };
 }
 
@@ -527,12 +529,14 @@ function pickEnemyType(world) {
 function dealDamage(world, enemy, raw, source = 'weapon') {
   const cond = conditionMultiplier(world, enemy);
   const gate = enemy.vehicleLevel ? vehicleRammedMultiplier(enemy.st, enemy.vehicleLevel) : 1;
-  const dmg = raw * cond.mult * gate;
+  let dmg = raw * cond.mult * gate;
+  // 技能伤害通用倍率（配置工作台）：主武器子弹(fire/weapon 来源)不受影响，各自有独立滑块
+  if (source && source !== 'weapon' && source !== 'fire') dmg *= tuning.skills.dmgMul;
   enemy.hp -= dmg;
   enemy.hitFlash = 90;
   if (gate > 1) addFloater(world, enemy.x, enemy.y - enemy.radius, `×3  ${Math.round(dmg)}`, '#ff4d4d');
   else if (cond.tag) addFloater(world, enemy.x, enemy.y - enemy.radius, `${cond.tag} ${Math.round(dmg)}`, cond.color);
-  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : source === 'vehicle' ? '#a8d08d' : source === 'freeze' ? '#8ce6ff' : '#ffffff');
+  else addFloater(world, enemy.x, enemy.y - enemy.radius, `${Math.round(dmg)}`, source === 'burn' || source === 'fire' ? '#ff9a3c' : source === 'shock' ? '#ffe14d' : source === 'vehicle' ? '#a8d08d' : source === 'freeze' ? '#8ce6ff' : '#ffffff');
   if (enemy.hp <= 0) killEnemy(world, enemy);
 }
 
@@ -574,12 +578,14 @@ function killEnemy(world, enemy, scored = true) {
   // 分裂兵：死亡裂成 2 只小兵（子代不再分裂，防递归）。推迟到 pendingEnemies，
   // 避免在敌人循环遍历中增长数组；在 update 末尾并入。
   if (enemy.splitter && !enemy.splitChild) spawnSplitChildren(world, enemy);
-  // 死亡爆裂粒子
-  const n = 10;
-  for (let i = 0; i < n; i++) {
-    const a = (Math.PI * 2 * i) / n + Math.random();
-    const sp = 60 + Math.random() * 120;
-    addParticle(world, enemy.x, enemy.y, Math.cos(a) * sp, Math.sin(a) * sp, 420, enemy.color, 3);
+  // 死亡爆裂粒子（配置工作台可关）
+  if (tuning.fx.deathFx) {
+    const n = 10;
+    for (let i = 0; i < n; i++) {
+      const a = (Math.PI * 2 * i) / n + Math.random();
+      const sp = 60 + Math.random() * 120;
+      addParticle(world, enemy.x, enemy.y, Math.cos(a) * sp, Math.sin(a) * sp, 420, enemy.color, 3);
+    }
   }
 }
 
@@ -708,7 +714,7 @@ function acquireTarget(world) {
   for (const e of world.enemies) {
     if (!e.alive) continue;
     const d = dist2(p.x, p.y, e.x, e.y);
-    if (d <= PLAYER.range * PLAYER.range && d < bestD) { bestD = d; best = e; }
+    if (d <= tuning.player.range * tuning.player.range && d < bestD) { bestD = d; best = e; }
   }
   return best;
 }
@@ -728,8 +734,8 @@ function fire(world, target) {
   const m = world.mods;
   const ang = Math.atan2(target.y - p.y, target.x - p.x);
   p.angle = ang;
-  const pierce = PLAYER.bulletPierce + m.pierceBonus;
-  const perBullet = PLAYER.baseDamage * m.bulletDamage * pelletFactor(m.spreadLanes) * pelletFactor(m.doubleShot);
+  const pierce = tuning.player.bulletPierce + m.pierceBonus;
+  const perBullet = tuning.player.baseDamage * m.bulletDamage * pelletFactor(m.spreadLanes) * pelletFactor(m.doubleShot);
   const lanes = 1 + m.spreadLanes;          // 散射：扇面铺开
   const SPREAD_STEP = 0.07;                 // 相邻弹道间隔 ≈4°
   const BURST_GAP = 41;                     // 连发：沿射向前后错开（24 → 41，用户 2026-11-02 要求间距 +70%）；700px/s × 16ms ≈ 11px/帧
@@ -744,11 +750,11 @@ function fire(world, target) {
       world.bullets.push({
         x: p.x + Math.cos(laneAng) * spawn,
         y: p.y + Math.sin(laneAng) * spawn,
-        vx: Math.cos(laneAng) * PLAYER.bulletSpeed,
-        vy: Math.sin(laneAng) * PLAYER.bulletSpeed,
+        vx: Math.cos(laneAng) * tuning.player.bulletSpeed,
+        vy: Math.sin(laneAng) * tuning.player.bulletSpeed,
         damage: perBullet,
         life: 1400,
-        radius: PLAYER.bulletRadius,
+        radius: tuning.player.bulletRadius,
         pierceLeft: pierce,   // 穿透：可连续命中 pierce 个敌人
         hitIds: [],           // 同一敌人不重复结算
         burstIdx: d,          // 连发序号（0=首发），渲染层用来画拖尾衔接
@@ -756,7 +762,7 @@ function fire(world, target) {
     }
   }
   p.ammo -= 1; // 只扣 1 tick：加弹道/连发不增加弹药消耗（06册3.2.0）
-  p.fireTimer = PLAYER.fireIntervalMs / m.fireRate;
+  p.fireTimer = tuning.player.fireIntervalMs / m.fireRate;
   if (p.ammo <= 0 && !p.reloading) startReload(world);
 }
 
@@ -764,7 +770,7 @@ function startReload(world) {
   const p = world.player;
   if (p.reloading || p.ammo >= magSizeOf(world)) return;
   p.reloading = true;
-  p.reloadTimer = PLAYER.reloadMs * world.mods.reloadMul;
+  p.reloadTimer = tuning.player.reloadMs * world.mods.reloadMul;
 }
 
 export function manualReload(world) {
@@ -994,8 +1000,8 @@ function spawnSubBullets(world, b, x, y) {
     // 进 pending 队列而不是直接 push：正在 for..of 遍历 world.bullets，直接 push 会让新子弹同帧被处理
     world.pendingBullets.push({
       x, y,
-      vx: Math.cos(ang) * PLAYER.bulletSpeed,
-      vy: Math.sin(ang) * PLAYER.bulletSpeed,
+      vx: Math.cos(ang) * tuning.player.bulletSpeed,
+      vy: Math.sin(ang) * tuning.player.bulletSpeed,
       damage: dmg,
       life: 1400,          // 同主子弹寿命（≈980px 射程，基本飞满全屏）
       radius: 3,           // 形态比主子弹小（减伤版的"小弹"）
@@ -1018,7 +1024,7 @@ export function castSkill(world, id) {
   if (id === 'shock') {
     if (!castSkyStrike(world)) return false; // 场上没有敌人：不消耗冷却
     world.petFlash = 320; // 机器人出手闪光
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
 
@@ -1026,7 +1032,7 @@ export function castSkill(world, id) {
   if (id === 'vehicle') {
     castVehicle(world);
     world.petFlash = 320;
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
 
@@ -1042,7 +1048,7 @@ export function castSkill(world, id) {
       pushRayBeam(world, baseAng + (i - (n - 1) / 2) * 0.14, false);
     }
     world.petFlash = 320;
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
   // 制导激光：朝最近敌人方向左右扫射的窄扇面
@@ -1061,7 +1067,7 @@ export function castSkill(world, id) {
       });
     }
     world.petFlash = 320;
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
   // 哨戒机：在要塞前方部署 1~N 台固定炮台
@@ -1076,7 +1082,7 @@ export function castSkill(world, id) {
       });
     }
     world.petFlash = 320;
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
   // 燃烧地带（2026-11-03 用户反馈：随机落点体验差）→ 优先放在**敌人最密集处**，无敌人再随机
@@ -1107,7 +1113,7 @@ export function castSkill(world, id) {
       });
     }
     world.petFlash = 320;
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
   // 旋转刀轮：从随机一侧横向滚过整屏（巨型卡放大体积/伤害；反弹卡给折返次数）
@@ -1127,7 +1133,7 @@ export function castSkill(world, id) {
       });
     }
     world.petFlash = 320;
-    slot.cd = sk.cooldownMs * m.skillCdMul[id];
+    slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
     return true;
   }
 
@@ -1152,7 +1158,7 @@ export function castSkill(world, id) {
     });
   }
   world.petFlash = 320; // 机器人出手闪光
-  slot.cd = sk.cooldownMs * m.skillCdMul[id];
+  slot.cd = sk.cooldownMs * m.skillCdMul[id] * tuning.skills.cdMul;
   return true;
 }
 
@@ -1229,7 +1235,7 @@ export function update(world, dtMs) {
     for (let i = 0; i < batch; i++) spawnEnemy(world, pickEnemyType(world));
     // 蜂群检查点波：一次性投放一整片蜂群（05 册约束：只波 7/13/17，单次 8-12 只），随后归零
     if (world.swarmQueued > 0) { spawnSwarm(world, world.swarmQueued); world.swarmQueued = 0; }
-    world.spawnTimer = script.interval * SPAWN_INTERVAL_TUNE;
+    world.spawnTimer = script.interval * tuning.enemy.spawnIntervalTune;
   }
   // 波次推进：按时间（04 册"波间无停顿"，上一波超时即接下一波），封顶 20 波
   if (!timeUp && world.time > world.wave * RUN.waveMs && world.wave < RUN.maxWave) {
@@ -1272,7 +1278,7 @@ export function update(world, dtMs) {
       if (e.dotAcc >= 9) {
         const acc = e.dotAcc;
         e.dotAcc = 0;
-        dealDamage(world, e, acc, 'burn');
+        dealDamage(world, e, acc, 'fire'); // 主武器火属性 DoT（'fire' 来源不参与技能伤害倍率）
         if (!e.alive) continue;
       }
     }
@@ -1571,7 +1577,7 @@ export function update(world, dtMs) {
   // 要塞常驻缓回：脱战 3 秒后按 regenPerSec 回复（解耦清波的回血机制，设计册基准）
   if (world.fortressRegenHold > 0) world.fortressRegenHold -= dtMs;
   else if (world.fortressHp > 0 && world.fortressHp < world.fortressMaxHp) {
-    world.fortressHp = Math.min(world.fortressMaxHp, world.fortressHp + (FORTRESS.regenPerSec * dtMs) / 1000);
+    world.fortressHp = Math.min(world.fortressMaxHp, world.fortressHp + (tuning.fortress.regenPerSec * dtMs) / 1000);
   }
   if (world.petFlash > 0) world.petFlash -= dtMs;
 

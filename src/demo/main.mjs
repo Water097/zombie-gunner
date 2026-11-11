@@ -12,6 +12,9 @@ import {
   createWorld, update, castSkill, manualReload, chooseCard, takeCard, magSizeOf, petPos,
   CARDS, WORLD, PLAYER, FORTRESS, ENEMY_TYPES, SKILLS, RUN,
 } from './combat-core.mjs';
+// 配置工作台：参数中心（tuning）与面板 UI。渲染层读 fx 开关，逻辑层读实时值，main 负责启动时接线。
+import { tuning, loadTuning, subscribe, applyTuningToWorld } from './tuning.mjs';
+import { initConfigPanel } from './config-panel.mjs';
 import { LEARN_CARDS } from './cards.mjs';
 import { has } from '../status/status-system.mjs';
 import { SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters } from './soft-fx.mjs';
@@ -82,6 +85,15 @@ function resize() {
 }
 window.addEventListener('resize', resize);
 resize();
+
+// ── 配置工作台接线 ──
+// 1) 载入本地保存的参数（localStorage，可能不存在 → 用默认）；
+// 2) 订阅变更：面板每次调参都会 notify，这里把「要塞上限 / 弹匣」等需要同步到 world 的项即时应用；
+// 3) 启动面板 UI（齿轮 + 滑出面板）。
+loadTuning();
+subscribe((t) => applyTuningToWorld(world));
+applyTuningToWorld(world);
+initConfigPanel();
 
 // ── 输入 ──
 window.addEventListener('keydown', (e) => {
@@ -689,9 +701,11 @@ function drawEnemies() {
       ctx.strokeStyle = 'rgba(255,107,107,0.75)'; ctx.lineWidth = 2;
       ctx.beginPath(); ctx.arc(x, y, R + 4, 0, Math.PI * 2); ctx.stroke();
     }
-    // 史莱姆精灵（概念图直接跑）；渲染失败才退回几何占位
+    // 史莱姆精灵（概念图直接跑）；渲染失败才退回几何占位。
+    // 配置工作台「敌人发光」关 → 跳过精灵（精灵自带辉光），改用无辉光的几何占位。
     // 传世界时钟（秒）作为动画取帧基准：所有同类型史莱姆按各自周期播放烘焙序列，帧率无关
-    if (!enemySprites.draw(ctx, e, world.time / 1000)) drawEnemyBody(e, x, y, r);
+    const showSprite = tuning.fx.enemyGlow && enemySprites.draw(ctx, e, world.time / 1000);
+    if (!showSprite) drawEnemyBody(e, x, y, r);
     const stCol = has(e.st, 'freeze') ? '#5ad1ff' : has(e.st, 'stun') ? '#c77dff' : has(e.st, 'burn') ? '#ff7a3c' : null;
     if (stCol) {
       ctx.globalAlpha = 0.22; ctx.fillStyle = stCol;
@@ -985,9 +999,9 @@ function drawStrikes() {
 
 // 以下三个函数保留原名与调用点，实现换成柔和卡通版重绘（读 world 状态、纯函数、帧率无关）。
 // 编排对齐 pixelfx：白热 hero frame → 扩散/弹出 → 冷却/挤压 → 余晖消散，快起慢收。
-function drawParticles() { drawSoftParticles(ctx, world.particles); }
+function drawParticles() { if (tuning.fx.particles) drawSoftParticles(ctx, world.particles); }
 function drawRings() { drawSoftRings(ctx, world.rings); }
-function drawFloaters() { drawSoftFloaters(ctx, world.floaters); }
+function drawFloaters() { if (tuning.fx.floaters) drawSoftFloaters(ctx, world.floaters); }
 
 function drawHUD() {
   // 顶部信息条
