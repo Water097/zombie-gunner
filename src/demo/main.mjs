@@ -18,6 +18,12 @@ import { initConfigPanel, PANEL_W } from './config-panel.mjs';
 import { LEARN_CARDS } from './cards.mjs';
 import { has } from '../status/status-system.mjs';
 import { SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters } from './soft-fx.mjs';
+// 技能美术：概念图 skills.mjs 演出的 Canvas2D 移植版（9 技能世界级驱动，视觉对齐概念图）
+import {
+  drawBeams as artBeams, drawSweeps as artSweeps, drawTurrets as artTurrets, drawSaws as artSaws,
+  drawVehicles as artVehicles, drawSkillShots as artSkillShots, drawStorms as artStorms,
+  drawArcs as artArcs, drawStrikes as artStrikes,
+} from './skill-art.mjs';
 // 敌人精灵层（2026-11-05）：把概念图里的史莱姆直接跑进 demo，替换原几何占位
 import { EnemySprites } from './sprite-layer.mjs';
 // 火场精灵层（2026-11-05 试点）：燃烧地带改走 pixelfx，和概念图同一份实现
@@ -756,50 +762,9 @@ function drawEnemyShots() {
 }
 
 // ── 五技能渲染（2026-11-03 补齐）──
-function drawBeams() {
-  for (const b of world.beams) {
-    const a = Math.max(0, b.life / b.maxLife);
-    const ex = b.x + Math.cos(b.ang) * b.len, ey = b.y + Math.sin(b.ang) * b.len;
-    ctx.globalAlpha = 0.22 * a; ctx.strokeStyle = b.color; ctx.lineWidth = b.halfWidth * 2;
-    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(ex, ey); ctx.stroke();
-    ctx.globalAlpha = 0.9 * a; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(b.x, b.y); ctx.lineTo(ex, ey); ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-}
-function drawSweeps() {
-  for (const s of world.sweeps) {
-    const a = Math.max(0, s.life / s.maxLife);
-    const ang = s.ang0 + Math.sin((s.t / 1000) * Math.PI * 1.1) * s.sweepAmp;
-    ctx.globalAlpha = 0.16 * a; ctx.fillStyle = s.color;
-    ctx.beginPath(); ctx.moveTo(s.x, s.y);
-    ctx.arc(s.x, s.y, s.range, ang - s.halfAngle, ang + s.halfAngle); ctx.closePath(); ctx.fill();
-    ctx.globalAlpha = 0.85 * a; ctx.strokeStyle = s.color; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(s.x, s.y);
-    ctx.lineTo(s.x + Math.cos(ang) * s.range, s.y + Math.sin(ang) * s.range); ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-}
-function drawTurrets() {
-  for (const s of world.turretShots) {
-    ctx.globalAlpha = Math.max(0, s.life / 120);
-    ctx.strokeStyle = '#cfe3ff'; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.moveTo(s.x, s.y); ctx.lineTo(s.tx, s.ty); ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-  for (const t of world.turrets) {
-    const a = Math.min(1, t.life / 800);
-    ctx.globalAlpha = 0.06 * a; ctx.strokeStyle = t.color; ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.arc(t.x, t.y, t.range, 0, Math.PI * 2); ctx.stroke();
-    ctx.globalAlpha = a;
-    ctx.fillStyle = '#1a2233'; ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = t.color; ctx.lineWidth = 2;
-    ctx.beginPath(); ctx.arc(t.x, t.y, t.r, 0, Math.PI * 2); ctx.stroke();
-    ctx.strokeStyle = t.color; ctx.lineWidth = 3;
-    ctx.beginPath(); ctx.moveTo(t.x, t.y); ctx.lineTo(t.x, t.y - t.r - 7); ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-}
+function drawBeams() { artBeams(ctx, world, world.time / 1000); }
+function drawSweeps() { artSweeps(ctx, world, world.time / 1000); }
+function drawTurrets() { artTurrets(ctx, world, world.time / 1000); }
 // ── 燃烧地带（2026-11-05 试点：改走 pixelfx 渲染路径）────────────────────────
 // 不再在 demo 里手绘：火场由 src/concept/flame-field.mjs 画，和概念图是同一份代码。
 // 这里只负责「调用 + 贴到世界坐标」。以前那套 Canvas2D 手绘已删除，
@@ -809,23 +774,7 @@ function drawFlames() {
   flameSprites.reap(world.flames);
 }
 
-function drawSaws() {
-  for (const s of world.saws) {
-    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(s.spin / 80);
-    ctx.fillStyle = 'rgba(207,216,227,0.20)';
-    ctx.beginPath(); ctx.arc(0, 0, s.r + 2, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = s.color; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(0, 0, s.r, 0, Math.PI * 2); ctx.stroke();
-    for (let i = 0; i < 8; i++) {
-      const a = (Math.PI * 2 * i) / 8;
-      ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * s.r * 0.4, Math.sin(a) * s.r * 0.4);
-      ctx.lineTo(Math.cos(a) * s.r, Math.sin(a) * s.r);
-      ctx.stroke();
-    }
-    ctx.restore();
-  }
-}
+function drawSaws() { artSaws(ctx, world, world.time / 1000); }
 
 function drawBullets() {
   // 子弹属性卡的可视化（06 册 §3.2.1）：带火 → 橙红，带爆炸 → 外圈黄环，子子弹 → 小颗偏黄白
@@ -849,159 +798,15 @@ function drawBullets() {
   }
 }
 
-function drawVehicles() {
-  for (const v of world.vehicles) {
-    if (v.ramp > 0) continue; // 还没进场
-    const a = Math.min(1, v.life / 400);
-    // 判定框 = 模型尺寸（重型车物理一致地一起放大）
-    const w = v.w, h = v.h;
-    const x = v.x - w / 2, y = v.y - h / 2;
-    ctx.globalAlpha = 0.14 * a;
-    ctx.fillStyle = v.color;
-    roundRect(x, y, w, h, 6); ctx.fill();
-    // 碾压判定描边（判定 = 模型，物理一致）
-    ctx.globalAlpha = 0.55 * a;
-    ctx.strokeStyle = '#e9c46a'; ctx.lineWidth = 1.2;
-    roundRect(x, y, w, h, 6); ctx.stroke();
-    // 尾尘（车后拖一条扬尘）
-    ctx.globalAlpha = 0.22 * a;
-    ctx.fillStyle = '#c9c2a8';
-    ctx.beginPath(); ctx.ellipse(v.x, v.y + h * 0.55, w * 0.45, h * 0.28, 0, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = a;
-    // 履带（左右两条深色带 + 分段）
-    ctx.fillStyle = '#2f3a28';
-    ctx.fillRect(x - 3, y + 4, 5, h - 8);
-    ctx.fillRect(x + w - 2, y + 4, 5, h - 8);
-    ctx.fillStyle = '#4a5a3c';
-    for (let i = 0; i < 5; i++) {
-      const ty = y + 6 + i * ((h - 12) / 5);
-      ctx.fillRect(x - 3, ty, 5, 3);
-      ctx.fillRect(x + w - 2, ty, 5, 3);
-    }
-    // 车体
-    ctx.fillStyle = v.color;
-    roundRect(x, y, w, h, 6); ctx.fill();
-    // 车体高光/阴影，做出立体感
-    ctx.fillStyle = 'rgba(255,255,255,0.14)';
-    roundRect(x + 3, y + 3, w - 6, h * 0.32, 4); ctx.fill();
-    ctx.fillStyle = 'rgba(0,0,0,0.22)';
-    roundRect(x + 3, y + h * 0.66, w - 6, h * 0.3, 4); ctx.fill();
-    // 炮管（朝上，指向行进方向）
-    ctx.fillStyle = '#3d4a33';
-    ctx.fillRect(v.x - 3, y - 12, 6, 14);
-    // 车头撞角（亮黄警示条）
-    ctx.fillStyle = '#e9c46a';
-    ctx.fillRect(x + 2, y + 1, w - 4, 3);
-  }
-  ctx.globalAlpha = 1;
-}
+function drawVehicles() { artVehicles(ctx, world, world.time / 1000); }
 
-function drawSkillShots() {
-  for (const s of world.skillShots) {
-    if (s.id === 'burn') {
-      ctx.fillStyle = s.color;
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 0.35;
-      ctx.beginPath(); ctx.arc(s.x, s.y, s.radius + 5, 0, Math.PI * 2); ctx.fill();
-      ctx.globalAlpha = 1;
-    } else {
-      const ang = Math.atan2(s.vy, s.vx);
-      const len = 20;
-      ctx.save();
-      ctx.translate(s.x, s.y); ctx.rotate(ang);
-      ctx.globalAlpha = 0.3; ctx.fillStyle = s.color;
-      ctx.beginPath();
-      ctx.moveTo(-len, 0); ctx.lineTo(0, -s.radius - 3); ctx.lineTo(len * 0.4, 0); ctx.lineTo(0, s.radius + 3);
-      ctx.closePath(); ctx.fill();
-      ctx.globalAlpha = 0.95;
-      ctx.beginPath();
-      ctx.moveTo(-len * 0.8, 0); ctx.lineTo(0, -s.radius); ctx.lineTo(len * 0.3, 0); ctx.lineTo(0, s.radius);
-      ctx.closePath(); ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-    }
-  }
-}
+function drawSkillShots() { artSkillShots(ctx, world, world.time / 1000); }
 
 // 电磁天雷：从屏幕顶落下的锯齿闪电柱 + 落点电光圈（280ms 渐隐）
 // 雷雨区（20 级「雷暴」）：半透明区域底色 + 呼吸虚线圈 + 区内雨丝
-function drawStorms() {
-  for (const s of world.storms) {
-    const a = Math.max(0, s.life / s.maxLife);
-    const t = world.time / 1000;
-    // 区域底色
-    ctx.globalAlpha = 0.10 * a;
-    ctx.fillStyle = s.color;
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
-    // 呼吸虚线圈（提示"这里在下雷雨"）
-    const pulse = 0.5 + 0.5 * Math.sin(t * 8);
-    ctx.globalAlpha = (0.28 + 0.22 * pulse) * a;
-    ctx.strokeStyle = s.color; ctx.lineWidth = 2;
-    ctx.setLineDash([6, 8]);
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.stroke();
-    ctx.setLineDash([]);
-    // 雨丝：18 列，按时间向下滚，裁剪在圆内
-    ctx.globalAlpha = 0.32 * a;
-    ctx.strokeStyle = s.color; ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < 18; i++) {
-      const dx = (((i * 73) % 100) / 100 * 2 - 1) * s.r;
-      const half = Math.sqrt(Math.max(0, s.r * s.r - dx * dx));
-      if (half <= 2) continue;
-      const phase = ((i * 37) % 100) / 100;
-      const py = s.y - half + ((phase + t * 1.7) % 1) * half * 2;
-      const px = s.x + dx;
-      ctx.moveTo(px, py);
-      ctx.lineTo(px - 1.5, py + 9);
-    }
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawArcs() {
-  for (const a of world.arcs) {
-    const al = Math.max(0, a.life / a.maxLife);
-    // 外层辉光
-    ctx.globalAlpha = al * 0.35;
-    ctx.strokeStyle = a.color; ctx.lineWidth = 6; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    for (let i = 0; i < a.pts.length; i++) { const p = a.pts[i]; if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y); }
-    ctx.stroke();
-    // 内芯
-    ctx.globalAlpha = al * 0.9;
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2;
-    ctx.stroke();
-  }
-  ctx.globalAlpha = 1;
-}
-
-function drawStrikes() {
-  for (const s of world.strikes) {
-    const a = Math.max(0, s.life / s.maxLife);
-    const w = s.minor ? 5 : 9; // 雷雨区的次级落雷画细一点，不与主闪电抢视线
-    // 外层辉光（粗、半透明黄）
-    ctx.globalAlpha = a * 0.35;
-    ctx.strokeStyle = s.color; ctx.lineWidth = w; ctx.lineJoin = 'round';
-    ctx.beginPath();
-    for (let i = 0; i < s.bolt.length; i++) {
-      const p = s.bolt[i];
-      if (i === 0) ctx.moveTo(p.x, p.y); else ctx.lineTo(p.x, p.y);
-    }
-    ctx.stroke();
-    // 内芯（细、白亮）
-    ctx.globalAlpha = a * 0.95;
-    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = s.minor ? 2 : 3;
-    ctx.stroke();
-    // 落点电光：填充渐隐圆 + 冲击亮斑
-    ctx.globalAlpha = a * 0.22;
-    ctx.fillStyle = s.color;
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = a * 0.9;
-    ctx.beginPath(); ctx.arc(s.x, s.y, s.minor ? 5 : 8, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 1;
-  }
-}
+function drawStorms() { artStorms(ctx, world, world.time / 1000); }
+function drawArcs() { artArcs(ctx, world); }
+function drawStrikes() { artStrikes(ctx, world, world.time / 1000); }
 
 // 以下三个函数保留原名与调用点，实现换成柔和卡通版重绘（读 world 状态、纯函数、帧率无关）。
 // 编排对齐 pixelfx：白热 hero frame → 扩散/弹出 → 冷却/挤压 → 余晖消散，快起慢收。

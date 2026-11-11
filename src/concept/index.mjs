@@ -7,14 +7,16 @@
 import { createFrame, clearFrame, createFx, composite } from '../../vendor/pixelfx/src/core/index.js';
 import { PAL } from '../../vendor/pixelfx/src/core/color.js';
 import { ENEMY_EFFECTS, DEATH_EFFECTS } from './enemies.mjs';
-import { GEAR_EFFECTS } from './equipment.mjs';
+import { GEAR_EFFECTS, drawGearWithTier } from './equipment.mjs';
 import { GRADE_EFFECTS } from './grades.mjs';
 import { UPGRADE_EFFECTS } from './upgrade-fx.mjs';
 import { SCENE_EFFECTS } from './scene.mjs';
 import { FOE_SPEC_EFFECTS } from './foe-spec.mjs';
-import { WEAPON_EFFECTS, BULLET_EFFECTS, BULLET_ATTR_EFFECTS, WEAPON_BLAST_EFFECTS } from './weapons.mjs';
+import { WEAPON_EFFECTS, BULLET_EFFECTS, BULLET_ATTR_EFFECTS, WEAPON_BLAST_EFFECTS, drawWeaponWithTier } from './weapons.mjs';
 import { SKILL_EFFECTS } from './skills.mjs';
 import { ACTOR_EFFECTS } from './misc.mjs';
+import { TIERS } from './tiers.mjs';
+import { frameMeta, makeFx } from './pixel-lib.mjs';
 
 // ── 原库现成特效（直接借鉴 / 只换 palette，不改一行源码） ──
 import * as fxSlime from '../../vendor/pixelfx/src/fx/critters/slime.js';
@@ -102,6 +104,57 @@ export const REFS = [
   ['pickups/coin-spin', '金币'],
   ['pickups/gem-spin', '宝石'],
 ];
+
+// ── 品级切换 tab ───────────────────────────────────────────────
+// 预览页顶部的品级 tab 驱动这里：选中一档，武器 6 型号 + 装备 6 部位的卡片
+// 全部改用该档色阶与光效重绘；剪影函数仍是同一份（drawWeaponWithTier / drawGearWithTier）。
+// 「图鉴原色」= 不传 T，回到型号/部位识别色，即 CATALOG 里的原始 item。
+export { TIERS };
+
+/** 可被品级覆盖的类别 → 目标 id 列表（装备总览 gear-map 不是单件装备，不参与）。 */
+export const TIERABLE = {
+  weapons: WEAPON_EFFECTS.map((e) => e.id),
+  gear: GEAR_EFFECTS.filter((e) => e.id !== 'gear-map').map((e) => e.id),
+};
+
+const tierBase = (catId, id) => (catId === 'weapons'
+  ? WEAPON_EFFECTS.find((e) => e.id === id)
+  : GEAR_EFFECTS.find((e) => e.id === id));
+
+/**
+ * 生成一个「按品级覆盖配色」的 pure effect item。
+ * meta 沿用原卡的 size/origin/duration/fps（各型号射击节奏不丢），只换 name/desc/tags。
+ */
+export function makeTierItem(catId, targetId, T) {
+  const base = tierBase(catId, targetId);
+  if (!base || !T) return base;
+  const kind = catId === 'weapons' ? 'weapon' : 'gear';
+  const mods = [
+    `外缘光 ${T.rings} 圈`,
+    `呼吸光 ${T.glowK.toFixed(2)}`,
+    `环绕粒子 ${T.sparks}`,
+    T.sweep ? '流光扫过' : null,
+    T.crack ? '甲面黑纹' : null,
+    T.aura ? '脉动光环' : null,
+  ].filter(Boolean).join(' / ');
+  const meta = {
+    ...base.mod.meta,
+    name: `${base.name} · ${T.name}`,
+    desc: `品级 ${T.num}/6 · ${T.color}`,
+    tags: ['tier', kind, T.id],
+  };
+  return {
+    ...base,
+    name: `${base.name} · ${T.name}`,
+    spec: `品级 ${T.num}/6 · ${T.color}｜${T.note}`,
+    read: `剪影与图鉴原色完全一致，只换色阶与光效：${mods}`,
+    source: `内核新写（品级系统 · ${T.name}）`,
+    demoHook: `${kind}.grade = ${T.num} → TIERS[${T.num - 1}]`,
+    mod: makeFx(meta, (p, t) => catId === 'weapons'
+      ? drawWeaponWithTier(p, t, targetId, T)
+      : drawGearWithTier(p, t, targetId, T)),
+  };
+}
 
 /**
  * 把一个 pure effect 模块挂到一张 canvas 上。

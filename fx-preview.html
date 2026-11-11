@@ -35,6 +35,23 @@
   .stat{color:var(--gold);font-size:12px;border:2px solid #4a3c18;background:#1a160c;padding:6px 10px;box-shadow:3px 3px 0 #050a0e}
   .note{color:var(--cy);background:#0d2029;border-left:4px solid var(--cy);padding:9px 12px;font-size:12px;max-width:1100px}
   .note b{color:#fff}
+  /* 品级切换 tab：选中一档，武器 6 型号 + 装备 6 部位整套换装 */
+  .tierbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:14px 0 0;padding:10px;
+    border:2px solid var(--line2);background:#101b23;box-shadow:3px 3px 0 #050a0e}
+  .tb-label{font-size:12px;color:var(--dim);margin-right:2px;letter-spacing:.5px}
+  .tb-label b{color:var(--gold)}
+  .tier-tab{position:relative;padding:6px 12px;border:2px solid #33454d;border-radius:0;
+    background:#16242e;color:var(--dim);font:inherit;font-size:12px;cursor:pointer;
+    box-shadow:2px 2px 0 #050a0e;transition:transform .12s,border-color .12s,color .12s}
+  .tier-tab:hover{transform:translateY(-1px);color:#fff;border-color:var(--cy)}
+  .tier-tab .dot{display:inline-block;width:9px;height:9px;margin-right:7px;border-radius:50%;
+    vertical-align:0;border:1px solid rgba(255,255,255,.28)}
+  .tier-tab.on{color:#fff;border-color:var(--gold);background:#20242a;
+    box-shadow:0 0 0 #050a0e;transform:translate(2px,2px)}
+  .tier-tab.on::after{content:"";position:absolute;left:0;right:0;bottom:-2px;height:2px;background:var(--gold)}
+  .tier-hint{font-size:11.5px;color:var(--dim);margin:8px 0 0;max-width:1100px;line-height:1.6}
+  .tier-hint b{color:var(--txt)}
+  .card.tier-active{border-color:var(--gold);box-shadow:0 0 0 2px rgba(255,210,87,.30),4px 4px 0 #050a0e}
   nav{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 0}
   nav a{font-size:11px;color:var(--dim);border:1px solid var(--line);padding:4px 8px;text-decoration:none;background:#111c24}
   nav a:hover{color:var(--cy);border-color:var(--cy)}
@@ -90,6 +107,8 @@
     <a class="btn" href="index.html">→ 打开 demo 实机</a>
   </div>
   <div class="note"><b>每个格子都是实时运行的 pure effect 模块，不是图片、不是截图。</b> 它们和 pixelfx 自带 232 个特效走同一条 <code>createFrame → createFx → composite → putImageData</code> 管线；把模块从这里的 canvas 挪进 demo 的 render 循环，绘制代码一行都不用改。点击任意卡片可单独暂停对照。</div>
+  <div class="tierbar" id="tierbar"></div>
+  <p class="tier-hint" id="tierHint"></p>
   <nav id="nav"></nav>
 </header>
 
@@ -107,7 +126,7 @@
 </footer>
 
 <script type="module">
-import { CATALOG, REFS, makeRenderer } from './src/concept/index.mjs';
+import { CATALOG, REFS, makeRenderer, TIERS, TIERABLE, makeTierItem } from './src/concept/index.mjs';
 
 const main = document.getElementById('main');
 const nav = document.getElementById('nav');
@@ -143,12 +162,17 @@ for (const cat of CATALOG) {
       </div>
       <h3>${item.name}</h3>
       <p class="spec">${item.spec || ''}</p>
-      ${item.mech ? `<p class="mech">${item.mech}</p>` : ''}
-      ${item.read ? `<p class="read">读法：${item.read}</p>` : ''}
+      <p class="mech">${item.mech || ''}</p>
+      <p class="read">${item.read ? '读法：' + item.read : ''}</p>
       <code>${item.demoHook || ''}</code>
       <div class="src">${item.source}</div>`;
     const ctx = el.querySelector('canvas').getContext('2d', { alpha: true });
-    const card = { r, ctx, el, visible: false, paused: false };
+    const card = { r, ctx, el, item, catId: cat.id, visible: false, paused: false };
+    // 记录可被品级 tab 覆盖的卡片（武器 6 型号 / 装备 6 部位）
+    if (TIERABLE[cat.id] && TIERABLE[cat.id].includes(item.id)) {
+      card.tierCat = cat.id;
+      card.tierTarget = item.id;
+    }
     el._card = card;
     el.addEventListener('click', () => {
       card.paused = !card.paused;
@@ -185,6 +209,57 @@ for (const cat of CATALOG) {
 
 document.getElementById('stat').textContent =
   `${CATALOG.length} 类 · ${cards.length} 张概念图 · ${fresh} 张内核新写 / ${borrowed} 张现成借鉴`;
+
+// ── 品级切换 tab ───────────────────────────────────────────────
+// 只替换卡片的 renderer（pure effect 模块）与文案：DOM、IntersectionObserver、暂停状态全部保留。
+const tierbar = document.getElementById('tierbar');
+const tierHint = document.getElementById('tierHint');
+const tabDefs = [
+  { key: 'base', label: '图鉴原色', color: '#8fa6b6', num: 0 },
+  ...TIERS.map((T, i) => ({ key: i, label: T.name, color: T.body[4], num: T.num })),
+];
+const tabBtns = [];
+const tbLabel = document.createElement('span');
+tbLabel.className = 'tb-label';
+tbLabel.innerHTML = '<b>品级</b> 切换：';
+tierbar.appendChild(tbLabel);
+for (const d of tabDefs) {
+  const b = document.createElement('button');
+  b.className = 'tier-tab';
+  b.innerHTML = `<span class="dot" style="background:${d.color}"></span>${d.label}${d.num ? ` <span style="opacity:.6;font-size:10px">${d.num}/6</span>` : ''}`;
+  b.title = d.num ? `切换到 ${d.label}（品级 ${d.num}/6）` : '回到型号 / 部位识别色';
+  b.onclick = () => setTier(d.key);
+  tierbar.appendChild(b);
+  tabBtns.push({ b, key: d.key });
+}
+
+function updateCardText(el, item) {
+  el.querySelector('h3').textContent = item.name;
+  el.querySelector('.spec').textContent = item.spec || '';
+  el.querySelector('.mech').textContent = item.mech || '';
+  el.querySelector('.read').textContent = item.read ? '读法：' + item.read : '';
+  el.querySelector('code').textContent = item.demoHook || '';
+  el.querySelector('.src').textContent = item.source || '';
+}
+
+function setTier(key) {
+  const T = key === 'base' ? null : TIERS[key];
+  for (const c of cards) {
+    if (c.tierCat) {
+      const item = T ? makeTierItem(c.tierCat, c.tierTarget, T) : c.item;
+      c.r = makeRenderer(item);       // 换成该品级的 pure effect 模块
+      updateCardText(c.el, item);
+    }
+    // 「品级对照」区里，把当前档的两张卡（突击步枪 / 胸甲）描金高亮
+    const hit = T && c.catId === 'tiers' && c.item.id.endsWith('-' + T.id);
+    c.el.classList.toggle('tier-active', !!hit);
+  }
+  for (const t of tabBtns) t.b.classList.toggle('on', t.key === key);
+  tierHint.innerHTML = T
+    ? `当前 <b style="color:${T.body[5]}">${T.name} · 品级 ${T.num}/6 · ${T.color}</b>：武器 6 型号 + 装备 6 部位已全部换成该档色阶与光效（剪影一行未动）。${T.note} 下方「品级对照」里对应的两张卡已描金高亮。`
+    : `当前 <b>图鉴原色</b>：武器按型号识别色、装备按部位识别色（预览页默认视图）。点上方任一品级，武器与装备整套换装。`;
+}
+setTier('base');
 
 // 分类 section 是 JS 动态生成的：浏览器解析 HTML 时 hash 目标还不存在，
 // 直接带 #anchor 打开会定位失败（甚至被带到页尾）。生成后补一次定位。
