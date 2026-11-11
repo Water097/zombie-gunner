@@ -14,7 +14,7 @@ import {
 } from './combat-core.mjs';
 // 配置工作台：参数中心（tuning）与面板 UI。渲染层读 fx 开关，逻辑层读实时值，main 负责启动时接线。
 import { tuning, loadTuning, subscribe, applyTuningToWorld } from './tuning.mjs';
-import { initConfigPanel } from './config-panel.mjs';
+import { initConfigPanel, PANEL_W } from './config-panel.mjs';
 import { LEARN_CARDS } from './cards.mjs';
 import { has } from '../status/status-system.mjs';
 import { SoftFx, drawSoftParticles, drawSoftRings, drawSoftFloaters } from './soft-fx.mjs';
@@ -76,7 +76,13 @@ function skillSlots() {
 }
 
 function resize() {
-  const scale = Math.min(window.innerWidth / WORLD.W, window.innerHeight / WORLD.H);
+  // 配置工作台是左侧常驻侧边栏（宽 PANEL_W）。给它让出左侧空间：wrap 左内边距 = PANEL_W，
+  // 画布在剩余区域里居中；缩放基准宽度相应减去 PANEL_W，避免被侧栏挤窄。
+  const wrap = canvas.parentElement; // #wrap
+  wrap.style.boxSizing = 'border-box';
+  wrap.style.paddingLeft = PANEL_W + 'px';
+  const availW = Math.max(1, window.innerWidth - PANEL_W);
+  const scale = Math.min(availW / WORLD.W, window.innerHeight / WORLD.H);
   canvas.style.width = `${WORLD.W * scale}px`;
   canvas.style.height = `${WORLD.H * scale}px`;
   canvas.width = Math.round(WORLD.W * DPR);

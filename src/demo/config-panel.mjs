@@ -8,6 +8,9 @@
 
 import { tuning, getPath, setPath, saveTuning, resetTuning, notify } from './tuning.mjs';
 
+// 工作台固定宽度（左侧常驻侧边栏）。main.mjs 的 resize 会据此把游戏画布右移避让。
+export const PANEL_W = 380;
+
 // ── 控件定义 ──
 // group：分组标题；items：该组控件。
 //   type: 'toggle' → 开关；缺省 → 滑块（min/max/step）
@@ -60,50 +63,44 @@ const SCHEMA = [
 ];
 
 const CSS = `
-.zg-gear { position: fixed; top: 10px; right: 10px; z-index: 9999; width: 40px; height: 40px;
-  border-radius: 50%; border: 1px solid rgba(90,209,255,0.5); background: rgba(12,18,30,0.85);
-  color: #5ad1ff; font-size: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.5); transition: transform .15s, background .15s; }
-.zg-gear:hover { background: rgba(20,30,48,0.95); transform: rotate(35deg); }
-.zg-panel { position: fixed; top: 0; right: 0; z-index: 9998; width: 300px; max-width: 86vw; height: 100%;
-  background: rgba(10,14,22,0.96); color: #dfe8f5; font-family: -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
-  box-shadow: -4px 0 24px rgba(0,0,0,0.6); transform: translateX(105%); transition: transform .22s ease;
-  display: flex; flex-direction: column; }
-.zg-panel.open { transform: translateX(0); }
-.zg-head { padding: 14px 16px 10px; border-bottom: 1px solid rgba(255,255,255,0.08);
+/* 左侧常驻侧边栏（不再收进设置里，打开即见） */
+.zg-panel { position: fixed; top: 0; left: 0; z-index: 9998; width: var(--zg-w, 380px); height: 100vh;
+  background: rgba(10,14,22,0.97); color: #dfe8f5;
+  font-family: -apple-system,"PingFang SC","Microsoft YaHei",sans-serif;
+  box-shadow: 4px 0 24px rgba(0,0,0,0.6); display: flex; flex-direction: column;
+  border-right: 1px solid rgba(90,209,255,0.18); }
+.zg-head { padding: 16px 18px 12px; border-bottom: 1px solid rgba(255,255,255,0.08);
   display: flex; align-items: center; justify-content: space-between; }
-.zg-title { font-size: 15px; font-weight: 700; letter-spacing: .5px; }
+.zg-title { font-size: 16px; font-weight: 700; letter-spacing: .5px; }
 .zg-title small { color: #7f93ad; font-weight: 400; font-size: 11px; margin-left: 6px; }
-.zg-close { cursor: pointer; color: #8aa0bb; font-size: 20px; line-height: 1; padding: 2px 6px; }
-.zg-close:hover { color: #fff; }
-.zg-body { overflow-y: auto; padding: 6px 14px 18px; flex: 1; }
-.zg-group { margin-top: 14px; }
-.zg-group > h4 { margin: 0 0 8px; font-size: 12px; color: #5ad1ff; letter-spacing: 1px;
+.zg-body { overflow-y: auto; padding: 8px 16px 18px; flex: 1; }
+.zg-group { margin-top: 16px; }
+.zg-group > h4 { margin: 0 0 10px; font-size: 13px; color: #5ad1ff; letter-spacing: 1px;
   display: flex; align-items: center; gap: 6px; opacity: .92; }
-.zg-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 9px 0; }
-.zg-label { font-size: 12.5px; color: #cdd8e8; flex: 0 0 auto; }
-.zg-label small { display: block; color: #6f829a; font-size: 10px; margin-top: 1px; }
-.zg-ctrl { display: flex; align-items: center; gap: 8px; flex: 1; justify-content: flex-end; }
-.zg-val { font-size: 12px; color: #ffe14d; min-width: 42px; text-align: right; font-variant-numeric: tabular-nums; }
-.zg-range { -webkit-appearance: none; appearance: none; width: 120px; height: 4px; border-radius: 3px;
+.zg-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 11px 0; }
+.zg-label { font-size: 13px; color: #cdd8e8; flex: 0 0 auto; }
+.zg-label small { display: block; color: #6f829a; font-size: 10.5px; margin-top: 2px; }
+.zg-ctrl { display: flex; align-items: center; gap: 10px; flex: 1; justify-content: flex-end; }
+.zg-val { font-size: 13px; color: #ffe14d; min-width: 48px; text-align: right; font-variant-numeric: tabular-nums; }
+.zg-range { -webkit-appearance: none; appearance: none; width: 150px; height: 5px; border-radius: 3px;
   background: rgba(255,255,255,0.15); outline: none; }
-.zg-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 14px; height: 14px;
+.zg-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px;
   border-radius: 50%; background: #5ad1ff; cursor: pointer; box-shadow: 0 0 6px rgba(90,209,255,0.6); }
-.zg-range::-moz-range-thumb { width: 14px; height: 14px; border: none; border-radius: 50%; background: #5ad1ff; cursor: pointer; }
+.zg-range::-moz-range-thumb { width: 16px; height: 16px; border: none; border-radius: 50%; background: #5ad1ff; cursor: pointer; }
 /* 开关 */
-.zg-switch { position: relative; width: 38px; height: 20px; flex: 0 0 auto; }
+.zg-switch { position: relative; width: 42px; height: 22px; flex: 0 0 auto; }
 .zg-switch input { opacity: 0; width: 0; height: 0; }
-.zg-track { position: absolute; inset: 0; border-radius: 20px; background: rgba(255,255,255,0.18);
+.zg-track { position: absolute; inset: 0; border-radius: 22px; background: rgba(255,255,255,0.18);
   transition: background .15s; cursor: pointer; }
-.zg-track::before { content: ''; position: absolute; left: 2px; top: 2px; width: 16px; height: 16px;
+.zg-track::before { content: ''; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px;
   border-radius: 50%; background: #fff; transition: transform .15s; }
 .zg-switch input:checked + .zg-track { background: #2fbf71; }
-.zg-switch input:checked + .zg-track::before { transform: translateX(18px); }
-.zg-foot { padding: 10px 14px; border-top: 1px solid rgba(255,255,255,0.08); }
-.zg-reset { width: 100%; padding: 9px; border: 1px solid rgba(255,107,107,0.5); border-radius: 6px;
+.zg-switch input:checked + .zg-track::before { transform: translateX(20px); }
+.zg-foot { padding: 12px 16px; border-top: 1px solid rgba(255,255,255,0.08); }
+.zg-reset { width: 100%; padding: 10px; border: 1px solid rgba(255,107,107,0.5); border-radius: 6px;
   background: rgba(255,107,107,0.12); color: #ff9a9a; font-size: 13px; cursor: pointer; }
 .zg-reset:hover { background: rgba(255,107,107,0.22); }
-.zg-hint { font-size: 10.5px; color: #6f829a; margin-top: 8px; line-height: 1.5; }
+.zg-hint { font-size: 11px; color: #6f829a; margin-top: 8px; line-height: 1.5; }
 `;
 
 const controls = []; // { item, input, valEl }
@@ -170,18 +167,12 @@ export function initConfigPanel() {
   style.textContent = CSS;
   document.head.appendChild(style);
 
-  const gear = document.createElement('div');
-  gear.className = 'zg-gear';
-  gear.title = '配置工作台';
-  gear.textContent = '⚙';
-  document.body.appendChild(gear);
-
   const panel = document.createElement('div');
   panel.className = 'zg-panel';
+  panel.style.setProperty('--zg-w', PANEL_W + 'px');
   panel.innerHTML = `
     <div class="zg-head">
       <div class="zg-title">配置工作台 <small>实时生效 · 自动保存</small></div>
-      <div class="zg-close" title="关闭">×</div>
     </div>
     <div class="zg-body"></div>
     <div class="zg-foot">
@@ -200,15 +191,11 @@ export function initConfigPanel() {
     body.appendChild(grp);
   }
 
-  const open = () => { panel.classList.add('open'); syncControls(); };
-  const close = () => panel.classList.remove('open');
-  gear.addEventListener('click', () => panel.classList.contains('open') ? close() : open());
-  panel.querySelector('.zg-close').addEventListener('click', close);
-
   panel.querySelector('.zg-reset').addEventListener('click', () => {
     resetTuning();   // 写回默认 + 存盘 + notify
     syncControls();  // 面板控件同步到新值
   });
 
-  // 供 combat-core 的 notify 钩子：面板只负责 UI，世界应用由 main.mjs 注册
+  // 工作台常驻左侧，不收进设置里；启动时同步一次当前值即可（运行时改值会即时 notify）
+  syncControls();
 }
