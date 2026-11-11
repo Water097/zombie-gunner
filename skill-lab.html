@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>技能实验室 · 9 技能逐个测试</title>
+<style>
+  :root{
+    --bg:#0a1016; --panel:#111c24; --line:#2a3d44; --line2:#3b5560;
+    --txt:#e7eefc; --dim:#8fa6b6; --cy:#7fe0ff; --gold:#ffd257; --grn:#8fe08f; --red:#ff8a7a;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding:0 0 60px;color:var(--txt);
+    font:13px/1.6 ui-monospace,Consolas,"Microsoft YaHei",monospace;
+    background:repeating-linear-gradient(0deg,transparent 0 7px,rgba(127,224,255,.025) 7px 8px),var(--bg)}
+  header{padding:20px 22px 16px;border-bottom:2px solid var(--line2);background:#0d1720}
+  h1{font-size:21px;margin:0 0 5px;letter-spacing:1px}
+  h1 b{color:var(--gold)}
+  .lead{color:var(--dim);max-width:1100px;margin:0;font-size:12px}
+  .lead b{color:var(--txt)}
+  .bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:14px 0 10px}
+  button,a.btn{display:inline-block;padding:7px 12px;border:2px solid var(--line2);border-radius:0;
+    background:#16242e;color:var(--txt);font:inherit;font-size:12px;text-decoration:none;cursor:pointer;
+    box-shadow:3px 3px 0 #050a0e}
+  button:hover,a.btn:hover{background:#1d3340;border-color:var(--cy);color:var(--cy)}
+  button:active,a.btn:active{box-shadow:0 0 0;transform:translate(3px,3px)}
+  button.on{background:#243c2c;border-color:var(--grn);color:var(--grn)}
+  label.chk{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);cursor:pointer;
+    border:2px solid var(--line);padding:6px 10px;background:#111c24}
+  label.chk input{accent-color:var(--cy)}
+  .note{color:var(--cy);background:#0d2029;border-left:4px solid var(--cy);padding:9px 12px;font-size:12px;max-width:1100px}
+  .note b{color:#fff}
+  .tabs{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 0}
+  .tab{position:relative;padding:7px 11px;font-size:12px;box-shadow:2px 2px 0 #050a0e}
+  .tab .dot{display:inline-block;width:8px;height:8px;margin-right:6px;border-radius:50%;vertical-align:1px;
+    border:1px solid rgba(255,255,255,.3)}
+  .tab.on{border-color:var(--gold)!important;color:#fff!important;background:#20242a!important;
+    box-shadow:0 0 0 #050a0e;transform:translate(2px,2px)}
+  .info{margin:12px 0 0;padding:10px 12px;border:1px solid var(--line);background:#101b23;font-size:12px;max-width:1100px}
+  .info h3{margin:0 0 4px;font-size:13px;color:var(--gold)}
+  .info p{margin:0 0 8px;color:var(--dim)}
+  .params{display:flex;gap:7px;flex-wrap:wrap}
+  .params span{border:1px solid var(--line2);background:#16242e;padding:3px 8px;font-size:11px}
+  .params span b{color:var(--cy);font-weight:400}
+  main{padding:18px 22px}
+  .single{display:flex;justify-content:center;gap:18px;align-items:flex-start;flex-wrap:wrap}
+  #big{width:min(360px,88vw);aspect-ratio:450/800;height:auto;display:block;background:#0c1018;
+    border:2px solid var(--line2);box-shadow:5px 5px 0 #050a0e}
+  .side{max-width:340px;min-width:220px;font-size:12px;color:var(--dim)}
+  .side h2{font-size:14px;color:var(--txt);margin:0 0 8px}
+  .side ul{padding-left:18px;margin:0 0 14px}
+  .side li{margin-bottom:5px}
+  .side code{color:var(--cy);font-size:11px}
+  .grid{display:grid;grid-template-columns:repeat(3,minmax(190px,1fr));gap:12px}
+  .cell{background:var(--panel);border:2px solid var(--line);padding:8px;cursor:pointer;box-shadow:4px 4px 0 #050a0e}
+  .cell:hover{border-color:var(--gold)}
+  .cell canvas{width:100%;aspect-ratio:450/800;height:auto;display:block;background:#0c1018;border:1px solid #22323a}
+  .cell h3{font-size:12px;margin:7px 0 0;color:var(--txt)}
+  .cell h3 small{color:var(--dim);font-weight:400;font-size:10px;margin-left:6px}
+  .hidden{display:none!important}
+  @media(max-width:1000px){.grid{grid-template-columns:repeat(2,minmax(170px,1fr))}}
+  @media(max-width:640px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <h1>技能实验室 · <b>9/9 逐个测试</b></h1>
+  <p class="lead">用 <b>Demo 实机同一份渲染层</b>（<code>src/demo/skill-art.mjs</code>）＋<b>真实 SKILLS 参数</b>驱动一份可控的测试 world。不用抽卡、不用等 CD、没有怪物干扰：每个技能都能立刻、反复、干净地看完整演出。参数取自 <code>combat-core.mjs</code>，改数值这里会自动跟着变。</p>
+  <div class="bar">
+    <button id="viewSingle" class="on">单技能 · 大舞台</button>
+    <button id="viewGrid">九宫格 · 全部同屏</button>
+    <button id="togglePlay">⏸ 暂停</button>
+    <button id="replay">↻ 重播</button>
+    <button id="speed">速度 ×1</button>
+    <label class="chk"><input type="checkbox" id="loop" checked>自动循环</label>
+    <label class="chk"><input type="checkbox" id="axis" checked>目标方向轴</label>
+    <a class="btn" href="index.html">→ Demo 实机</a>
+    <a class="btn" href="fx-preview.html">→ 概念图库</a>
+  </div>
+  <div class="note"><b>怎么看方向对不对：</b>黄色虚线是「发射点 → 目标」的目标轴，目标在正上方。制导激光 / 高能射线 / 干冰弹 / 温压弹都应沿这条轴往上打；装甲车从下方往上碾；旋转刀轮横向滚。黄色虚线可在上方关掉。</div>
+  <div class="tabs" id="tabs"></div>
+  <div class="info" id="info"></div>
+</header>
+
+<main>
+  <div id="single" class="single">
+    <canvas id="big" width="450" height="800"></canvas>
+    <div class="side">
+      <h2>快捷键</h2>
+      <ul>
+        <li><b>1–9</b>：切到对应技能（按技能序号）</li>
+        <li><b>空格</b>：暂停 / 播放</li>
+        <li><b>R</b>：重播当前演出</li>
+      </ul>
+      <h2>这一页测什么</h2>
+      <ul>
+        <li>技能<b>形态</b>是否读得出来（不再是一个球换颜色）</li>
+        <li><b>方向 / 朝向</b>是否贴合玩法（目标轴 + 敌人剪影作参照）</li>
+        <li><b>所见即所受</b>：扇面半角、火区椭圆、车身判定框</li>
+        <li>九宫格 = 之前 02 册 §2.7 的「同屏叠加可读性」压测</li>
+      </ul>
+      <p style="margin-top:12px">渲染函数、色阶、演出逻辑全部来自 <code>skill-art.mjs</code>；这里只负责造实体与推进时间，<b>没有第二套画法</b>。</p>
+    </div>
+  </div>
+  <div id="grid" class="grid hidden"></div>
+</main>
+
+<script type="module">
+import { LAB, blankWorld, drawBackdrop, SPECS, specById } from './src/demo/skill-lab-specs.mjs';
+import { FlameSprites } from './src/demo/flame-sprites.mjs';
+
+const $ = (id) => document.getElementById(id);
+let view = 'single', activeId = SPECS[0].id;
+let playing = true, speed = 1, autoLoop = true, showAxis = true;
+
+class Stage {
+  constructor(canvas, spec) { this.cv = canvas; this.ctx = canvas.getContext('2d', { alpha: false }); this.setSpec(spec); }
+  setSpec(spec) { this.spec = spec; this.reset(); }
+  reset() {
+    this.w = blankWorld();
+    this.sprites = new FlameSprites();
+    this.clock = 0; this.cycle = 0;
+    this.spec.make(this.w);
+  }
+  step(dt) {
+    this.clock += dt; this.cycle += dt;
+    if (this.cycle >= this.spec.dur) {
+      if (autoLoop) this.reset(); else this.cycle = this.spec.dur;
+    }
+    this.spec.tick(this.w, dt, this.cycle);
+  }
+  draw(dt) {
+    const c = this.ctx;
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over'; c.setLineDash([]);
+    drawBackdrop(c, { axis: showAxis });
+    this.spec.draw(c, this.w, this.clock, dt, this.sprites);
+    // 舞台内标签（九宫格也能自解释，不依赖外部 DOM）
+    c.globalAlpha = 1; c.globalCompositeOperation = 'source-over';
+    c.fillStyle = 'rgba(8,12,24,0.74)'; c.fillRect(0, 0, LAB.W, 26);
+    c.fillStyle = '#e7eefc'; c.font = 'bold 13px sans-serif'; c.textAlign = 'left';
+    c.fillText(`${this.spec.name} · ${this.spec.tag}`, 10, 18);
+    c.textAlign = 'right'; c.fillStyle = '#7fe0ff'; c.font = '11px monospace';
+    c.fillText(`${this.cycle.toFixed(1)} / ${this.spec.dur.toFixed(1)}s`, LAB.W - 10, 18);
+  }
+}
+
+// ── 技能 tab ────────────────────────────────────────────────
+const tabs = $('tabs'), tabBtns = [];
+SPECS.forEach((s, i) => {
+  const b = document.createElement('button');
+  b.className = 'tab';
+  b.innerHTML = `<span class="dot" style="background:${s.color}"></span>${i + 1} ${s.name}`;
+  b.title = s.tag;
+  b.onclick = () => select(s.id, true);
+  tabs.appendChild(b);
+  tabBtns.push({ b, id: s.id });
+});
+
+// ── 单技能舞台 ──────────────────────────────────────────────
+const big = $('big');
+big.width = LAB.W; big.height = LAB.H;
+const singleStage = new Stage(big, SPECS[0]);
+
+// ── 九宫格舞台 ──────────────────────────────────────────────
+const gridEl = $('grid'), gridStages = [];
+for (const s of SPECS) {
+  const cell = document.createElement('article');
+  cell.className = 'cell';
+  const cv = document.createElement('canvas');
+  cv.width = LAB.W; cv.height = LAB.H;
+  const h = document.createElement('h3');
+  h.innerHTML = `${s.name} <small>${s.tag}</small>`;
+  cell.appendChild(cv); cell.appendChild(h);
+  cell.title = `点击查看「${s.name}」单技能大舞台`;
+  cell.onclick = () => { select(s.id, true); setView('single'); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  gridEl.appendChild(cell);
+  gridStages.push(new Stage(cv, s));
+}
+
+function renderInfo() {
+  const s = specById(activeId);
+  const ps = s.params().map(([k, v]) => `<span>${k} <b>${v}</b></span>`).join('');
+  $('info').innerHTML = view === 'grid'
+    ? `<h3>九宫格 · 9 技能同屏</h3><p>各自按自己的演出时长独立循环，相位错开。看的标准只有一条：一眼能不能说出「场上正在发生哪几件事」。点任意格子进入单技能大舞台细看。</p>`
+    : `<h3>${s.name} · ${s.tag}</h3><p>读法：${s.read}</p><div class="params">${ps}</div>`;
+}
+
+function select(id, forceSingle = false) {
+  activeId = id;
+  singleStage.setSpec(specById(id));
+  for (const t of tabBtns) t.b.classList.toggle('on', t.id === id);
+  if (forceSingle && view !== 'single') setView('single');
+  renderInfo();
+  if (!playing) { singleStage.draw(0); }
+}
+
+function setView(v) {
+  view = v;
+  $('single').classList.toggle('hidden', v !== 'single');
+  $('grid').classList.toggle('hidden', v !== 'grid');
+  $('viewSingle').classList.toggle('on', v === 'single');
+  $('viewGrid').classList.toggle('on', v === 'grid');
+  renderInfo();
+  // 暂停状态下切视图也要出画面，否则新视图停在上一帧（或黑屏）
+  if (!playing) {
+    if (v === 'grid') for (const st of gridStages) st.draw(0);
+    else singleStage.draw(0);
+  }
+}
+
+$('viewSingle').onclick = () => setView('single');
+$('viewGrid').onclick = () => setView('grid');
+$('togglePlay').onclick = () => {
+  playing = !playing;
+  $('togglePlay').textContent = playing ? '⏸ 暂停' : '▶ 播放';
+  $('togglePlay').classList.toggle('on', !playing);
+};
+function replay() {
+  if (view === 'grid') for (const st of gridStages) st.reset();
+  else singleStage.reset();
+  singleStage.draw(0);
+  if (view === 'grid') for (const st of gridStages) st.draw(0);
+}
+$('replay').onclick = replay;
+$('speed').onclick = () => {
+  speed = speed === 1 ? 0.5 : speed === 0.5 ? 2 : 1;
+  $('speed').textContent = `速度 ×${speed}`;
+};
+$('loop').onchange = (e) => { autoLoop = e.target.checked; };
+$('axis').onchange = (e) => { showAxis = e.target.checked; };
+
+window.addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); $('togglePlay').click(); return; }
+  if (e.key === 'r' || e.key === 'R') { replay(); return; }
+  const n = Number(e.key);
+  if (n >= 1 && n <= SPECS.length) select(SPECS[n - 1].id, true);
+});
+
+// ── 主循环 ──────────────────────────────────────────────────
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000) * speed;
+  last = now;
+  if (playing) {
+    const list = view === 'grid' ? gridStages : [singleStage];
+    for (const st of list) { st.step(dt); st.draw(dt); }
+  }
+  requestAnimationFrame(frame);
+}
+
+// 首帧先画一次，避免进入页面时黑屏
+select(SPECS[0].id);
+for (const st of gridStages) st.draw(0);
+singleStage.draw(0);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

@@ -763,7 +763,7 @@ function drawEnemyShots() {
 
 // ── 五技能渲染（2026-11-03 补齐）──
 function drawBeams() { artBeams(ctx, world, world.time / 1000); }
-function drawSweeps() { artSweeps(ctx, world, world.time / 1000); }
+function drawSweeps() { artSweeps(ctx, world); }
 function drawTurrets() { artTurrets(ctx, world, world.time / 1000); }
 // ── 燃烧地带（2026-11-05 试点：改走 pixelfx 渲染路径）────────────────────────
 // 不再在 demo 里手绘：火场由 src/concept/flame-field.mjs 画，和概念图是同一份代码。

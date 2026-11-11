@@ -303,13 +303,19 @@ export function drawBeams(ctx, world, time) {
 }
 
 // 6 · 制导激光：窄扇面左右扫 + 扫痕 + 终点爆（按 world.sweeps）
-export function drawSweeps(ctx, world, time) {
+//
+// ⚠️ 坐标系纪律（2026-11-11 修复）：内核 `ang0` 是标准 atan2 角（0=+x，PI/2=+y），
+// 命定判定用 dx=cos(ang), dy=sin(ang)。概念图那套「0=正上」的 x=sin/y=-cos 换算
+// 整体差 90°，直接搬会让朝上的激光画成朝左/左下扫（用户看到的「往底部扫射」）。
+// 扇面半角也必须直接取 s.halfAngle（判定同值），否则又变成「所见非所受」。
+export function drawSweeps(ctx, world) {
   const p = new P(ctx); const C = EL.laser;
   for (const s of world.sweeps) {
     const a = Math.max(0, s.life / s.maxLife);
-    const sweep = s.ang0 + Math.sin((s.t / 1000) * Math.PI * 1.1) * s.sweepAmp;
-    const half = 0.09 + 0.03 * Math.sin((s.t / 1000) * TAU * 3);
-    const tip = (ang, len) => [s.x + Math.sin(ang) * len, s.y - Math.cos(ang) * len];
+    const phase = Math.sin((s.t / 1000) * Math.PI * 1.1);   // 与内核扫动同相位
+    const sweep = s.ang0 + phase * s.sweepAmp;
+    const half = s.halfAngle;
+    const tip = (ang, len) => [s.x + Math.cos(ang) * len, s.y + Math.sin(ang) * len];
     const [ex0, ey0] = tip(sweep - half, s.range), [ex1, ey1] = tip(sweep + half, s.range);
     const [ix0, iy0] = tip(sweep - half, s.range * 0.82), [ix1, iy1] = tip(sweep + half, s.range * 0.82);
     p.poly([[s.x, s.y], [ex0, ey0], [ex1, ey1]], C[2], a * 0.5);
@@ -317,16 +323,17 @@ export function drawSweeps(ctx, world, time) {
     p.line(s.x, s.y, ex0, ey0, C[5], a);
     p.line(s.x, s.y, ex1, ey1, C[5], a);
     const [mx, my] = tip(sweep, s.range);
-    p.line(s.x, s.y + 2, mx, my, C[6], a);
+    p.line(s.x, s.y, mx, my, C[6], a);
     p.glowLine(s.x, s.y, mx, my, 6, C[4], 0.35 * a);
-    // 发射器
-    p.rect(s.x - 9, s.y - 4, 18, 9, EL.steel[2], a);
-    p.rect(s.x - 9, s.y - 4, 18, 2, EL.steel[4], a);
-    p.poly([[s.x - 5, s.y], [s.x + 5, s.y], [s.x + 3, s.y - 6], [s.x - 3, s.y - 6]], C[3], a);
-    p.glow(s.x, s.y, 12, C[4], 0.4 * a);
-    // 终点爆
-    const atEdge = Math.abs(Math.sin((s.t / 1000) * TAU)) > 0.93;
-    if (atEdge) { p.disc(mx, my, 7, C[6], 0.8 * a); p.glow(mx, my, 14, C[5], 0.5 * a); }
+    // 发射器：跟着当前扫射角转（局部 -y = 炮口方向）
+    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(sweep + Math.PI / 2);
+    p.rect(-9, -4, 18, 9, EL.steel[2], a);
+    p.rect(-9, -4, 18, 2, EL.steel[4], a);
+    p.poly([[-5, 0], [5, 0], [3, -6], [-3, -6]], C[3], a);
+    p.glow(0, 0, 12, C[4], 0.4 * a);
+    ctx.restore();
+    // 终点爆：扫到最左/最右端点时才出现（与扫动同相位，别用另一条 sin 曲线）
+    if (Math.abs(phase) > 0.93) { p.disc(mx, my, 7, C[6], 0.8 * a); p.glow(mx, my, 14, C[5], 0.5 * a); }
   }
   p.reset();
 }
@@ -402,7 +409,7 @@ export function drawVehicles(ctx, world, time) {
   for (const v of world.vehicles) {
     if (v.ramp > 0) continue;
     const a = Math.min(1, v.life / 400);
-    const heavy = v.h > 60;
+    const heavy = v.heavy ?? (v.h > 60);
     const w = v.w, h = v.h;
     const x = v.x, y = v.y;
     const HW = w * 0.5, TW = w * 0.18, L = h;
@@ -410,7 +417,8 @@ export function drawVehicles(ctx, world, time) {
     const OL = EL.olive, TR = EL.track, CV = EL.chev;
     const K = heavy ? 1.26 : 1.0;
 
-    ctx.save(); ctx.translate(x, y); ctx.rotate(Math.PI); // 车头朝下（碾压向下）
+    // 不翻转：实体 vy = -speed 向上碾，概念图的车头也在 top 侧，两者一致。
+    ctx.save(); ctx.translate(x, y);
     // 地面投影
     p.ellipse(0, L / 2 + 2, w * 0.30, w * 0.10, INK, 0.42 * a);
     // 扬尘
@@ -450,8 +458,8 @@ export function drawVehicles(ctx, world, time) {
       for (const s of [-1, 1]) for (let i = 0; i < 3; i++) { const by = top + 6 + i * ((L - 14) / 3); p.rect(s * (HW / 2 + 1) - (s > 0 ? 4 : 0), by, 4, 7, EL.camp[2], a); p.rect(s * (HW / 2 + 1) - (s > 0 ? 4 : 0), by, 4, 1, OL[4], a); }
       p.rect(-6, top + 2, 12, 3, TR[4], a); p.rect(-1, top - 4, 2, 7, TR[3], a);
     }
-    // 车头撞角（车头朝下，所以亮黄条在底部）
-    p.rect(-HW / 2 + 2, bot - 4, HW - 4, 3, CV[4], a);
+    // 车头撞角（亮黄警示条在行进方向 front = top 侧）
+    p.rect(-HW / 2 + 2, top + 1, HW - 4, 3, CV[4], a);
     ctx.restore();
   }
   p.reset();
