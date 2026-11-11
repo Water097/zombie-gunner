@@ -401,6 +401,19 @@ export function createWorld() {
 
 function dist2(ax, ay, bx, by) { const dx = ax - bx, dy = ay - by; return dx * dx + dy * dy; }
 
+// 燃烧地带命中形状：椭圆（与视觉 flame-field.mjs 同一公式，保证「所见即所受」）。
+// 02 册 2.5 纪律：地面元素一律压扁成椭圆，ry ≈ rx × 0.34（GROUND_K）。
+const FLAME_SQUASH = 0.34;
+const _smoothstep = (v) => { v = v < 0 ? 0 : v > 1 ? 1 : v; return v * v * (3 - 2 * v); };
+// 根据火焰剩余寿命还原当前椭圆长/短半轴（起燃 16% 铺开、熄灭后 20% 收掉，与渲染同步）。
+function flameEllipse(f) {
+  const u = Math.min(1, Math.max(0, 1 - f.life / f.maxLife));
+  const grow = _smoothstep(u / 0.16);
+  const fade = u > 0.80 ? 1 - (u - 0.80) / 0.20 : 1;
+  const rx = f.r * (0.36 + 0.64 * grow) * (0.74 + 0.26 * fade);
+  return { rx, ry: rx * FLAME_SQUASH };
+}
+
 // 弹匣容量固定 30（用户决定：不随卡变化）
 export function magSizeOf() {
   return PLAYER.magSize;
@@ -1488,10 +1501,13 @@ export function update(world, dtMs) {
     f.life -= dtMs; f.tickTimer -= dtMs;
     if (f.tickTimer <= 0) {
       f.tickTimer = SKILLS.flame.tickMs;
+      const { rx, ry } = flameEllipse(f);   // 椭圆（横向长、纵向扁），与视觉一致
       for (const e of world.enemies) {
         if (!e.alive) continue;
-        const rr = f.r + e.radius;
-        if (dist2(f.x, f.y, e.x, e.y) > rr * rr) continue;
+        // 椭圆内判定：各轴按敌人半径放宽（等价「带厚度的椭圆边界」）
+        const dx = (e.x - f.x) / (rx + e.radius);
+        const dy = (e.y - f.y) / (ry + e.radius);
+        if (dx * dx + dy * dy > 1) continue;
         dealDamage(world, e, f.dmgTick, 'burn');
         if (!e.alive) continue;
         apply(e.st, 'burn', f.dmgTick * 0.4 * (f.burnMul || 1), f.burnMs, { sourceId: 'skill-flame', sourceLevel: 1, displaceType: 'normal' });
