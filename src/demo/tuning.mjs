@@ -12,7 +12,7 @@
 const STORAGE_KEY = 'zombie-gunner.tuning.v1';
 
 // ── 默认参数（= 旧硬编码值，改这里不会影响未调参时的行为）──
-const DEFAULTS = {
+export const DEFAULTS = {   // 实验室需要一份纯默认值（不受 localStorage 影响）
   player: {
     baseDamage: 20,       // 每发基础伤害（原 PLAYER.baseDamage）
     fireIntervalMs: 500,  // 开火间隔（原 PLAYER.fireIntervalMs，越小越快）

@@ -24,6 +24,7 @@ import {
   drawVehicles as artVehicles, drawSkillShots as artSkillShots, drawStorms as artStorms,
   drawArcs as artArcs, drawStrikes as artStrikes,
 } from './skill-art.mjs';
+import { drawBullets as artBullets } from './weapon-art.mjs';
 // 敌人精灵层（2026-11-05）：把概念图里的史莱姆直接跑进 demo，替换原几何占位
 import { EnemySprites } from './sprite-layer.mjs';
 // 火场精灵层（2026-11-05 试点）：燃烧地带改走 pixelfx，和概念图同一份实现
@@ -776,27 +777,8 @@ function drawFlames() {
 
 function drawSaws() { artSaws(ctx, world, world.time / 1000); }
 
-function drawBullets() {
-  // 子弹属性卡的可视化（06 册 §3.2.1）：带火 → 橙红，带爆炸 → 外圈黄环，子子弹 → 小颗偏黄白
-  const fire = world.mods.bulletFire, boom = world.mods.bulletExplode;
-  for (const b of world.bullets) {
-    if (b.isSub) {
-      ctx.fillStyle = 'rgba(255,207,92,0.30)';
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 2, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ffe9b0';
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
-      continue;
-    }
-    ctx.fillStyle = fire ? 'rgba(255,110,60,0.38)' : 'rgba(255,224,138,0.4)';
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 3, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = fire ? '#ff7a3c' : '#ffe08a';
-    ctx.beginPath(); ctx.arc(b.x, b.y, b.radius, 0, Math.PI * 2); ctx.fill();
-    if (boom) {
-      ctx.strokeStyle = 'rgba(255,200,80,0.85)'; ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(b.x, b.y, b.radius + 1.5, 0, Math.PI * 2); ctx.stroke();
-    }
-  }
-}
+// 子弹渲染已抽到 weapon-art.mjs，与武器实验室共用同一份代码
+function drawBullets() { artBullets(ctx, world); }
 
 function drawVehicles() { artVehicles(ctx, world, world.time / 1000); }
 

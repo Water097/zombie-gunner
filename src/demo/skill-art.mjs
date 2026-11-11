@@ -46,7 +46,7 @@ const rnd = (i, s = 1) => { const x = Math.sin(i * 12.9898 + s * 78.233) * 43758
 // ─────────────────────────────────────────────────────────────
 // Canvas2D 版 p 画笔（签名与 pixel-lib 一致）
 // ─────────────────────────────────────────────────────────────
-class P {
+export class P {
   constructor(ctx) { this.c = ctx; }
   reset() { this.c.globalCompositeOperation = 'source-over'; this.c.globalAlpha = 1; }
 
@@ -174,7 +174,9 @@ export function drawSkillShots(ctx, world, time) {
     const isIce = s.id === 'freeze';
     const C = isIce ? EL.ice : EL.fire;
     const ang = Math.atan2(s.vy, s.vx);
-    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(ang);
+    // 弹体尖端画在局部 -y；要让它指向标准 atan2 角 ang，需 rotate(ang + π/2)。
+    // 只 rotate(ang) 会让弹头横过来（用户反馈「弹体水平于屏幕」的根因）。
+    ctx.save(); ctx.translate(s.x, s.y); ctx.rotate(ang + Math.PI / 2);
     const r = s.radius;
     // 拖尾
     trail(p, 0, r + 4, 22, 5, C, time * 3, { sway: 0 });
@@ -198,32 +200,73 @@ export function drawSkillShots(ctx, world, time) {
 }
 
 // 2/3/4 · 电磁天雷三件套：落雷 + 雷暴区 + 链式电弧
+//
+// 落雷是**一段快速演出**，不是一张挂在那儿渐隐的静图（2026-11-12 修「闪电不动」）：
+//   ① 闪现渐显(0~0.18)  积云 + 顶端微光
+//   ② 落雷(0.18~0.42)   折线从云底向下「生长」，逐帧抖动，末端击中落点
+//   ③ 命中(0.42~0.72)   白核 + 贴地椭圆电环扩散 + 爬电
+//   ④ 消失(0.72~1)      闪电淡出、电环收掉、余电闪点熄灭
+// 进度 k 取自实例自身 life/maxLife，所以实机 280ms 就是「快」，实验室拉长即可逐拍看清；
+// 折线 seed 用逐帧变化的数，闪电才会「闪」，固定 seed 会画成一条不动的折线。
 export function drawStrikes(ctx, world, time) {
   const p = new P(ctx); const C = EL.volt;
+  const frame = Math.floor(time * 60);
   for (const s of world.strikes) {
-    const a = Math.max(0, s.life / s.maxLife);
+    const k = clamp(1 - s.life / s.maxLife);          // 0→1 演出进度
+    const GY = s.y, topY = GY - (s.minor ? 44 : 60);
     const w = s.minor ? 5 : 9;
-    // 从屏幕顶劈下到落点
-    const topY = s.y - 60;
-    p.glowLine(s.x, topY, s.x, s.y, w, C[6], a * 0.3);
-    arc(p, s.x, topY, s.x, s.y, C[6], 7, 7);
-    arc(p, s.x, topY, s.x, s.y, WHITE, 16, 4);
-    if (!s.minor) arc(p, s.x - 4, topY + 20, s.x - 10, s.y - 4, C[4], 3, 5);
-    // 落点：贴地椭圆电环（概念图 thunder 的核心读法：扩散是压扁椭圆，不是悬空正圆）
-    const k = 1 - Math.max(0, s.life / s.maxLife);
-    if (k < 0.85) {
-      const rx = 4 + s.radius * 0.42 * ease.outQuad(k);
-      const col = k < 0.35 ? C[6] : k < 0.6 ? C[5] : C[3];
-      groundRing(p, s.x, s.y, rx, col, a, k < 0.35 ? 2 : 1);
+
+    // ① 闪现渐显
+    const cloud = seg(k, 0, 0.10) * (1 - seg(k, 0.30, 0.55));
+    if (cloud > 0.02) {
+      for (const [dx, dy, r] of [[-14, -6, 8], [0, -10, 11], [13, -7, 8]]) {
+        p.disc(s.x + dx, topY + dy, r * (0.5 + 0.5 * cloud), C[1], 0.55 * cloud);
+      }
+      p.glow(s.x, topY - 4, s.minor ? 12 : 22, C[4], 0.10 + 0.30 * cloud);
     }
-    p.glow(s.x, s.y, s.radius * 1.2, C[4], 0.4 * a);
-    p.ellipse(s.x, s.y, 4, 2.8, WHITE, a);
-    p.dot(s.x, s.y, WHITE, a);
-    // 余电闪点
-    const rk = seg(wrap(time, 1.0), 0.0, 0.5);
-    for (let i = 0; i < 3; i++) {
-      if (rnd(i + Math.floor(time * 30), 6) < rk) continue;
-      p.dot(Math.round(s.x + (rnd(i, 2) - 0.5) * 16), Math.round(s.y + (rnd(i, 3) - 0.5) * 8), C[5], a);
+
+    // ② 落雷：从云底长到落点，逐帧抖动
+    const boltK = seg(k, 0.18, 0.42);
+    if (boltK > 0 && k < 0.80) {
+      const endY = lerp(topY, GY, ease.outQuad(boltK));
+      const fade = 1 - seg(k, 0.58, 0.80);
+      p.glowLine(s.x, topY, s.x, endY, w, C[5], 0.25 * fade);
+      arc(p, s.x, topY, s.x, endY, C[6], frame, 7);
+      arc(p, s.x, topY, s.x, endY, WHITE, frame + 9, 3.2);
+      if (!s.minor) {
+        arc(p, s.x - 3, topY + (endY - topY) * 0.55, s.x - 10, Math.min(GY, endY + 12), C[4], frame + 3, 5);
+        arc(p, s.x + 3, topY + (endY - topY) * 0.70, s.x + 9, Math.min(GY, endY + 10), C[4], frame + 5, 5);
+      }
+    }
+
+    // ③ 命中：白核 + 贴地椭圆电环 + 爬电
+    if (k >= 0.42) {
+      const hit = seg(k, 0.42, 0.72);
+      if (hit < 0.5) { const cr = 5 * (1 - hit / 0.5) + 1; p.ellipse(s.x, GY, cr * 1.2, cr * 0.7, WHITE, 1 - hit / 0.5); }
+      p.glow(s.x, GY, 24 * (1 - hit * 0.6), C[4], 0.45 * (1 - hit));
+      if (hit < 0.85) {
+        const rx = 4 + s.radius * 0.42 * ease.outQuad(hit);
+        const col = hit < 0.35 ? C[6] : hit < 0.6 ? C[5] : C[3];
+        groundRing(p, s.x, GY, rx, col, 1 - hit, hit < 0.35 ? 2 : 1);
+        if (hit < 0.6) {
+          for (let i = 0; i < 5; i++) {
+            const ang = (i / 5) * TAU + 0.6, r0 = rx * 0.55, r1 = rx * 0.98;
+            arc(p,
+              s.x + Math.cos(ang) * r0, GY + Math.sin(ang) * r0 * GROUND_K,
+              s.x + Math.cos(ang) * r1, GY + Math.sin(ang) * r1 * GROUND_K,
+              C[5], frame + i * 13, 1.5);
+          }
+        }
+      }
+    }
+
+    // ④ 余电闪点（逐帧闪，逐渐熄灭）
+    if (k > 0.55) {
+      const fade = 1 - seg(k, 0.72, 1);
+      for (let i = 0; i < 3; i++) {
+        if (rnd(i + frame, 6) > fade) continue;
+        p.dot(Math.round(s.x + (rnd(i + frame, 2) - 0.5) * 16), Math.round(GY + (rnd(i + frame, 3) - 0.5) * 8), C[5], fade);
+      }
     }
   }
   p.reset();
@@ -339,16 +382,37 @@ export function drawSweeps(ctx, world) {
 }
 
 // 7 · 哨戒机：底座炮塔 + 转塔锁敌 + 连点射（按 world.turrets + turretShots）
+// 枪口方向由「当前射击目标」决定（turretShots 的 tx/ty，或最近敌人），
+// 不再用全局 time 左右摆 —— 用户反馈「摆来摆去」的根因。
+function turretAim(world, t) {
+  const my = t.y - 14;                         // 炮塔轴心
+  let best = null, bd = Infinity;
+  for (const sh of world.turretShots || []) {
+    const d = Math.hypot(sh.x - t.x, sh.y - t.y);
+    if (d < bd) { bd = d; best = sh; }
+  }
+  if (best && bd < 90 && Number.isFinite(best.tx)) return Math.atan2(best.ty - my, best.tx - t.x);
+  let foe = null, fd = Infinity;
+  for (const e of world.enemies || []) {
+    if (!e.alive) continue;
+    const d = Math.hypot(e.x - t.x, e.y - my);
+    if (d < fd) { fd = d; foe = e; }
+  }
+  return foe ? Math.atan2(foe.y - my, foe.x - t.x) : -Math.PI / 2;
+}
+
 export function drawTurrets(ctx, world, time) {
   const p = new P(ctx); const C = EL.steel;
   for (const sh of world.turretShots) {
     const a = Math.max(0, sh.life / 120);
-    p.glowLine(sh.x, sh.y, sh.tx, sh.ty, 2, '#cfe3ff', a * 0.9);
+    const ang = Math.atan2(sh.ty - sh.y, sh.tx - sh.x);
+    const sx = sh.x + Math.cos(ang) * 16, sy = sh.y + Math.sin(ang) * 16;   // 弹道从枪口出
+    p.glowLine(sx, sy, sh.tx, sh.ty, 2, '#cfe3ff', a * 0.9);
     if (a > 0.5) { p.disc(sh.tx, sh.ty, 4, WHITE, (a - 0.5) * 2); p.glow(sh.tx, sh.ty, 10, '#cfe3ff', 0.6 * (a - 0.5) * 2); }
   }
   for (const t of world.turrets) {
     const a = Math.min(1, t.life / 800);
-    const aim = -1.5 + Math.sin(time * 4) * 0.8;
+    const aim = turretAim(world, t);
     p.ellipse(t.x, t.y + 2, 14 * (t.r / 18), 5 * (t.r / 18), INK, 0.4 * a);
     p.line(t.x - 2, t.y - 4, t.x - 11, t.y + 2, C[2], a);
     p.line(t.x + 2, t.y - 4, t.x + 11, t.y + 2, C[2], a);
